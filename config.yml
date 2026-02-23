@@ -1,0 +1,67 @@
+# Drrik Framework Configuration
+# This file controls model loading, activation extraction, SAE training, and visualization
+
+# ============================================================================
+# Model Configuration
+# ============================================================================
+model_name: "google/gemma-2b"  # HuggingFace model name (<3B for 8GB VRAM)
+# model_revision: "main"           # Model revision
+# torch_dtype: "float16"          # Data type: float16, bfloat16, float32
+# device_map: "auto"               # Device mapping: auto, cpu, cuda
+# trust_remote_code: true          # Trust remote code when loading
+
+# ============================================================================
+# Dataset Configuration
+# ============================================================================
+dataset_name: "wikitext"         # HuggingFace dataset name
+dataset_config: "wikitext-2-raw-v1"  # Dataset configuration name
+split: "train"                    # Dataset split: train, validation, test
+num_samples: 1000                # Number of samples to process
+# max_length: 512                  # Maximum sequence length
+# text_column: "text"               # Name of text column in dataset
+batch_size: 8                     # Batch size for inference
+
+# ============================================================================
+# Activation Extraction Configuration
+# ============================================================================
+mlp_layers: [0]                   # List of MLP layer indices to extract from
+# activation_output_dir: "./activations"  # Where to save extracted activations
+
+# ============================================================================
+# Sparse Autoencoder Configuration
+# ============================================================================
+activation_dim: 2048             # Input dimension (automatically detected from activations)
+hidden_dim: 16384                # Hidden dimension (e.g., 8x expansion: 2048 * 8)
+l1_coefficient: 0.01              # L1 regularization strength for sparsity
+learning_rate: 0.0001             # Learning rate for Adam optimizer
+num_epochs: 50                    # Number of training epochs
+# batch_size: 256                   # Training batch size
+validation_split: 0.1              # Fraction of data for validation
+resample_dead_neurons: true        # Whether to resample dead neurons during training
+resample_interval: 10000          # Steps between resampling checks
+normalize_decoder: true            # Normalize decoder weights to unit norm
+pre_encoder_bias: true             # Use pre-encoder bias (as in the paper)
+
+# ============================================================================
+# Visualization Configuration
+# ============================================================================
+n_features_to_visualize: 10        # Number of top features to visualize
+# visualization_output_dir: "./visualizations"  # Where to save plots
+
+# ============================================================================
+# Wandb Configuration (Optional)
+# ============================================================================
+wandb_enabled: true                # Enable wandb logging (requires WANDB_API_KEY env var)
+wandb_project: "drrik-experiments"  # wandb project name
+# wandb_run_name: null              # Specific run name (auto-generated if null)
+# wandb_entity: null                 # wandb entity (username or team)
+
+# ============================================================================
+# Hardware Configuration
+# ============================================================================
+device: "auto"                     # Device for training: auto, cuda, cpu
+
+# ============================================================================
+# Output Configuration
+# ============================================================================
+output_dir: "./drrik_output"     # Base directory for all outputs
