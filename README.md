@@ -11,6 +11,7 @@ This framework implements a pipeline for:
 3. **Collecting MLP activations** using the [`nnsight`](https://github.com/ndif-team/nnsight) library
 4. **Training Sparse Autoencoders** to extract interpretable features
 5. **Visualizing features** with matplotlib and seaborn
+6. **Tracking experiments** with Weights & Biases (optional)
 
 ## Installation
 
@@ -45,7 +46,26 @@ pip install -e .
 
 ## Quick Start
 
-### Basic Usage
+### Option 1: Using the CLI (Recommended)
+
+The CLI provides a simple way to run the full pipeline with a YAML configuration file.
+
+```bash
+# Generate an example config file
+drrik init-config -o config.yml
+
+# Edit config.yml to customize your settings
+
+# Run the full pipeline (extract -> train -> visualize)
+drrik run config.yml
+
+# Or run individual steps
+drrik extract -c config.yml
+drrik train -c config.yml
+drrik visualize -c config.yml
+```
+
+### Option 2: Python API
 
 ```python
 from drrik import ActivationExtractor, SparseAutoencoder, FeatureVisualizer
@@ -72,7 +92,25 @@ visualizer = FeatureVisualizer(sae, activations, metadata)
 visualizer.save_all(n_features=10)
 ```
 
-### Run Example Scripts
+### CLI Commands
+
+The `drrik` CLI provides several commands:
+
+- `drrik init-config` - Generate an example YAML configuration file
+- `drrik extract` - Extract MLP activations from a model
+- `drrik train` - Train a sparse autoencoder
+- `drrik visualize` - Generate feature visualizations
+- `drrik run` - Run the full pipeline
+
+Each command supports additional options:
+
+```bash
+drrik extract --config config.yml --output-dir ./outputs --device cuda
+drrik train --config config.yml --activations ./outputs/activations.pkl
+drrik visualize --config config.yml --n-features 20 --no-wandb
+```
+
+### Example Scripts
 
 ```bash
 # Basic usage example
@@ -83,6 +121,9 @@ python examples/advanced_pipeline.py
 
 # Load saved activations
 python examples/load_saved_activations.py
+
+# Using wandb integration
+python examples/with_wandb.py
 ```
 
 ## Project Structure
@@ -94,21 +135,73 @@ drrik/
 │   ├── config.py             # Pydantic configuration classes
 │   ├── models.py             # Activation extraction using nnsight
 │   ├── autoencoder.py        # Sparse Autoencoder implementation
-│   └── visualization.py      # Feature visualization tools
+│   ├── visualization.py      # Feature visualization tools
+│   ├── settings.py           # Environment settings and wandb config
+│   └── cli.py                # Command-line interface
 ├── examples/
 │   ├── basic_usage.py        # Basic pipeline example
 │   ├── advanced_pipeline.py  # Advanced configuration examples
-│   └── load_saved_activations.py
-├── visualizations/           # Output directory for plots
+│   ├── load_saved_activations.py
+│   └── with_wandb.py         # wandb integration example
+├── tests/
+│   ├── conftest.py           # Pytest configuration
+│   ├── test_imports.py       # Core functionality tests
+│   └── test_settings.py      # Settings and wandb tests
+├── .env.example              # Environment variables template
+├── config.yml                # Example YAML configuration
 ├── pyproject.toml           # Project dependencies
 └── README.md
 ```
 
 ## Configuration
 
+### YAML Configuration (CLI)
+
+The CLI uses YAML configuration files for easy setup:
+
+```yaml
+# Model configuration
+model_name: "google/gemma-2b"
+torch_dtype: "float16"
+device_map: "auto"
+
+# Dataset configuration
+dataset_name: "wikitext"
+dataset_config: "wikitext-2-raw-v1"
+split: "train"
+num_samples: 1000
+batch_size: 8
+
+# Activation extraction
+mlp_layers: [0]
+
+# Sparse Autoencoder configuration
+activation_dim: 2048
+hidden_dim: 16384  # 8x expansion
+l1_coefficient: 0.01
+learning_rate: 0.0001
+num_epochs: 50
+validation_split: 0.1
+resample_dead_neurons: true
+
+# Visualization
+n_features_to_visualize: 10
+
+# Wandb integration (optional)
+wandb_enabled: true
+wandb_project: "drrik-experiments"
+
+# Output
+output_dir: "./drrik_output"
+```
+
+Generate an example config with: `drrik init-config -o config.yml`
+
+### Python API Configuration
+
 The framework uses Pydantic for configuration. Key configuration classes:
 
-### ActivationExtractorConfig
+#### ActivationExtractorConfig
 
 ```python
 from drrik.config import ActivationExtractorConfig, ModelConfig, DatasetConfig
@@ -128,7 +221,7 @@ config = ActivationExtractorConfig(
 )
 ```
 
-### SparseAutoencoderConfig
+#### SparseAutoencoderConfig
 
 ```python
 from drrik.config import SparseAutoencoderConfig
@@ -140,6 +233,23 @@ sae_config = SparseAutoencoderConfig(
     learning_rate=1e-4,
     resample_dead_neurons=True,
 )
+```
+
+## Environment Variables
+
+For API keys and optional settings, create a `.env` file (see `.env.example`):
+
+```bash
+# HuggingFace Hub token (for gated models)
+HF_TOKEN=your_token_here
+
+# Weights & Biases API key (optional, for experiment tracking)
+WANDB_API_KEY=your_wandb_key_here
+
+# Wandb settings
+WANDB_PROJECT=drrik-experiments
+WANDB_ENTITY=your_username
+WANDB_MODE=online  # or 'offline' to disable
 ```
 
 ## Key Features
@@ -167,6 +277,39 @@ Following the Anthropic paper:
 - **Pre-encoder bias**: As used in the paper
 - **Dead neuron resampling**: Reinitializes inactive neurons during training
 
+### Wandb Integration
+
+Optional wandb integration for experiment tracking:
+
+```python
+from drrik import WandbConfig, get_settings
+
+settings = get_settings()
+wandb_config = WandbConfig(
+    project="drrik-experiments",
+    name="my-experiment",
+    config={"model": "gemma-2b", "expansion": 8},
+    enabled=settings.use_wandb,  # Auto-disables if no API key
+)
+
+# Use in training
+sae.fit(activations, wandb_config=wandb_config, wandb_enabled=True)
+
+# Use in visualization
+visualizer = FeatureVisualizer(
+    sae=sae,
+    activations=activations,
+    wandb_config=wandb_config,
+    log_to_wandb=True,
+)
+```
+
+The framework automatically logs:
+- Training metrics (loss, L0 norm, dead neurons)
+- Learning rate changes
+- Activation histograms
+- Feature visualizations
+
 ## Visualization Outputs
 
 The framework generates several visualizations:
@@ -176,6 +319,8 @@ The framework generates several visualizations:
 3. **Top Features** - Features ranked by density/activation
 4. **Feature Dashboards** - Comprehensive view per feature
 5. **Activation Histograms** - Distribution of activations per feature
+
+All plots can be saved locally and optionally logged to wandb.
 
 ## API Reference
 
@@ -208,6 +353,8 @@ sae.fit(
     num_epochs: int = 100,
     learning_rate: float = 1e-4,
     resample_dead_neurons: bool = True,
+    wandb_config: Optional[WandbConfig] = None,
+    wandb_enabled: bool = False,
 )
 
 features = sae.encode(activations)
@@ -222,12 +369,32 @@ visualizer = FeatureVisualizer(
     activations: np.ndarray,
     metadata: Optional[Dict] = None,
     output_dir: str = "./visualizations",
+    wandb_config: Optional[WandbConfig] = None,
+    log_to_wandb: bool = False,
 )
 
 visualizer.plot_feature_density()
 visualizer.plot_top_features(n_features=10)
 visualizer.create_feature_dashboard(feature_idx=0)
 visualizer.save_all(n_features=10)
+```
+
+## Testing
+
+Run the test suite:
+
+```bash
+# Run all tests
+pytest
+
+# Run specific test file
+pytest tests/test_imports.py
+
+# Run with verbose output
+pytest -v
+
+# Skip slow tests
+pytest -m "not slow"
 ```
 
 ## References
