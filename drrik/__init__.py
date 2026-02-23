@@ -6,11 +6,12 @@ which applies dictionary learning to extract activations as features from transf
 based large language models and trains sparse autoencoders to linearize those activations.
 
 Key Components:
-- Model loading from HuggingFace Hub
+- Model loading from HuggingFace Hub (with gated model support)
 - Dataset loading and inference pipeline
 - MLP activation collection using nnsight
 - Sparse Autoencoder training for feature extraction
 - Visualization of feature-specific activation vectors
+- Optional Weights & Biases integration for experiment tracking
 
 Example Usage:
     from drrik import ActivationExtractor, SparseAutoencoder, FeatureVisualizer
@@ -25,15 +26,15 @@ Example Usage:
     )
     activations = extractor.extract()
 
-    # Train sparse autoencoder
+    # Train sparse autoencoder (with optional wandb logging)
     sae = SparseAutoencoder(
         activation_dim=activations.shape[-1],
         hidden_dim=activations.shape[-1] * 8,  # 8x expansion
         l1_coefficient=0.01
     )
-    sae.fit(activations)
+    sae.fit(activations, wandb_enabled=True)
 
-    # Visualize features
+    # Visualize features (with optional wandb logging)
     visualizer = FeatureVisualizer(sae)
     visualizer.plot_feature_density()
     visualizer.plot_top_activating_examples()
@@ -45,10 +46,14 @@ from drrik.models import ActivationExtractor
 from drrik.autoencoder import SparseAutoencoder
 from drrik.visualization import FeatureVisualizer
 from drrik.config import Config
+from drrik.settings import EnvironmentSettings, WandbConfig, get_settings
 
 __all__ = [
     "ActivationExtractor",
     "SparseAutoencoder",
     "FeatureVisualizer",
     "Config",
+    "EnvironmentSettings",
+    "WandbConfig",
+    "get_settings",
 ]

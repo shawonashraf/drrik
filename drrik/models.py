@@ -7,7 +7,7 @@ This module provides functionality to:
 3. Extract MLP activations using the nnsight library
 """
 
-from typing import List, Optional, Tuple, Union, Dict, Any
+from typing import Optional, Tuple, Union, Dict, Any
 from pathlib import Path
 import pickle
 
@@ -15,12 +15,13 @@ import torch
 import numpy as np
 from tqdm import tqdm
 from transformers import AutoTokenizer
-from datasets import load_dataset
+from datasets import load_dataset, Dataset
 from nnsight import NNsight
 
 from loguru import logger
 
-from drrik.config import ActivationExtractorConfig, ModelConfig, DatasetConfig
+from drrik.config import ActivationExtractorConfig
+from drrik.settings import get_settings
 
 
 class ActivationExtractor:
@@ -43,11 +44,7 @@ class ActivationExtractor:
         activations, metadata = extractor.extract()
     """
 
-    def __init__(
-        self,
-        config: Optional[ActivationExtractorConfig] = None,
-        **kwargs
-    ):
+    def __init__(self, config: Optional[ActivationExtractorConfig] = None, **kwargs):
         """
         Initialize the ActivationExtractor.
 
@@ -85,11 +82,23 @@ class ActivationExtractor:
         try:
             logger.info(f"Loading model: {self.config.model.model_name}")
 
-            # Load tokenizer
+            # Get HF token from settings
+            settings = get_settings()
+            hf_token = settings.huggingface_hub_token
+
+            if hf_token:
+                logger.info("Using HuggingFace Hub token for authentication")
+
+            # Load tokenizer with token
+            tokenizer_kwargs = {
+                "revision": self.config.model.revision,
+                "trust_remote_code": self.config.model.trust_remote_code,
+            }
+            if hf_token:
+                tokenizer_kwargs["token"] = hf_token
+
             self.tokenizer = AutoTokenizer.from_pretrained(
-                self.config.model.model_name,
-                revision=self.config.model.revision,
-                trust_remote_code=self.config.model.trust_remote_code
+                self.config.model.model_name, **tokenizer_kwargs
             )
 
             if self.tokenizer.pad_token is None:
@@ -99,21 +108,21 @@ class ActivationExtractor:
             dtype_map = {
                 "float16": torch.float16,
                 "bfloat16": torch.bfloat16,
-                "float32": torch.float32
+                "float32": torch.float32,
             }
-            torch_dtype = dtype_map.get(
-                self.config.model.torch_dtype,
-                torch.float16
-            )
+            torch_dtype = dtype_map.get(self.config.model.torch_dtype, torch.float16)
 
-            # Load model with nnsight
-            self.model = NNsight(
-                self.config.model.model_name,
-                revision=self.config.model.revision,
-                torch_dtype=torch_dtype,
-                trust_remote_code=self.config.model.trust_remote_code,
-                device_map=self.config.model.device_map
-            )
+            # Load model with nnsight (with token if available)
+            nnsight_kwargs = {
+                "revision": self.config.model.revision,
+                "torch_dtype": torch_dtype,
+                "trust_remote_code": self.config.model.trust_remote_code,
+                "device_map": self.config.model.device_map,
+            }
+            if hf_token:
+                nnsight_kwargs["token"] = hf_token
+
+            self.model = NNsight(self.config.model.model_name, **nnsight_kwargs)
 
             logger.info(f"Model loaded successfully on {self.model.device}")
             return self.model
@@ -122,7 +131,7 @@ class ActivationExtractor:
             logger.error(f"Failed to load model: {e}")
             raise RuntimeError(f"Model loading failed: {e}") from e
 
-    def load_dataset(self) -> "datasets.Dataset":
+    def load_dataset(self) -> Dataset:
         """
         Load the dataset from HuggingFace Hub.
 
@@ -141,11 +150,20 @@ class ActivationExtractor:
                 f"({self.config.dataset.split} split)"
             )
 
-            self.dataset = load_dataset(
-                self.config.dataset.dataset_name,
-                self.config.dataset.dataset_config,
-                split=self.config.dataset.split
-            )
+            # Get HF token from settings (for gated datasets)
+            settings = get_settings()
+            hf_token = settings.huggingface_hub_token
+
+            # Load dataset with token if available
+            load_kwargs = {
+                "path": self.config.dataset.dataset_name,
+                "name": self.config.dataset.dataset_config,
+                "split": self.config.dataset.split,
+            }
+            if hf_token:
+                load_kwargs["token"] = hf_token
+
+            self.dataset = load_dataset(**load_kwargs)
 
             logger.info(f"Dataset loaded with {len(self.dataset)} examples")
             return self.dataset
@@ -233,9 +251,7 @@ class ActivationExtractor:
             )
 
             # Prepare dataset
-            dataset = self.dataset.select(
-                range(min(n_samples, len(self.dataset)))
-            )
+            dataset = self.dataset.select(range(min(n_samples, len(self.dataset))))
 
             # Tokenize dataset
             def tokenize_function(examples):
@@ -244,14 +260,14 @@ class ActivationExtractor:
                     padding="max_length",
                     truncation=True,
                     max_length=self.config.dataset.max_length,
-                    return_tensors="pt"
+                    return_tensors="pt",
                 )
 
             tokenized = dataset.map(
                 tokenize_function,
                 batched=True,
                 remove_columns=dataset.column_names,
-                desc="Tokenizing"
+                desc="Tokenizing",
             )
 
             # Get MLP layer names
@@ -279,7 +295,9 @@ class ActivationExtractor:
                     attention_mask = torch.stack(batch["attention_mask"])
 
                     # Use nnsight to extract activations
-                    with self.model.trace(input_ids, attention_mask=attention_mask) as tracer:
+                    with self.model.trace(
+                        input_ids, attention_mask=attention_mask
+                    ) as tracer:
                         # Collect outputs from each MLP layer
                         layer_outputs = []
                         for layer_path in layer_paths:
@@ -312,11 +330,15 @@ class ActivationExtractor:
                         self._activations.append(np.concatenate(sample_activations))
 
                         # Store metadata
-                        self._metadata.append({
-                            "sample_idx": start_idx + sample_idx,
-                            "text": dataset[start_idx + sample_idx][self.config.dataset.text_column][:200],
-                            "input_ids": batch_input_ids[sample_idx],
-                        })
+                        self._metadata.append(
+                            {
+                                "sample_idx": start_idx + sample_idx,
+                                "text": dataset[start_idx + sample_idx][
+                                    self.config.dataset.text_column
+                                ][:200],
+                                "input_ids": batch_input_ids[sample_idx],
+                            }
+                        )
 
             activations = np.array(self._activations)
             logger.info(f"Extracted activations shape: {activations.shape}")
@@ -357,10 +379,7 @@ class ActivationExtractor:
 
         filepath = Path(filepath)
 
-        data = {
-            "activations": activations,
-            "metadata": metadata
-        }
+        data = {"activations": activations, "metadata": metadata}
 
         with open(filepath, "wb") as f:
             pickle.dump(data, f)

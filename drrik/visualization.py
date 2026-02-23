@@ -9,20 +9,18 @@ This module provides tools for visualizing:
 - Training curves
 """
 
-from typing import Optional, List, Tuple, Union, Dict, Any
+from typing import Optional, List, Union, Dict, Any
 from pathlib import Path
-import string
 
 import numpy as np
 import matplotlib.pyplot as plt
-import matplotlib.patches as mpatches
 from matplotlib.gridspec import GridSpec
 import seaborn as sns
-from scipy import stats
 
 from loguru import logger
 
 from drrik.autoencoder import SparseAutoencoder
+from drrik.settings import WandbConfig
 
 
 class FeatureVisualizer:
@@ -48,6 +46,8 @@ class FeatureVisualizer:
         output_dir: Union[str, Path] = "./visualizations",
         style: str = "whitegrid",
         dpi: int = 150,
+        wandb_config: Optional[WandbConfig] = None,
+        log_to_wandb: bool = True,
     ):
         """
         Initialize the visualizer.
@@ -59,12 +59,16 @@ class FeatureVisualizer:
             output_dir: Directory to save plots
             style: Seaborn style to use
             dpi: DPI for saved figures
+            wandb_config: Optional WandbConfig for logging visualizations
+            log_to_wandb: If True, log plots to wandb when wandb_config is provided
         """
         self.sae = sae
         self.activations = activations
         self.metadata = metadata or {}
         self.output_dir = Path(output_dir)
         self.dpi = dpi
+        self.wandb_config = wandb_config
+        self.log_to_wandb = log_to_wandb
 
         # Set style
         sns.set_style(style)
@@ -76,9 +80,27 @@ class FeatureVisualizer:
         # Compute feature activations
         self._compute_features()
 
+    def _log_figure_to_wandb(self, fig: plt.Figure, name: str) -> None:
+        """
+        Log a matplotlib figure to wandb.
+
+        Args:
+            fig: The matplotlib figure
+            name: Name for the plot in wandb
+        """
+        if self.wandb_config and self.log_to_wandb:
+            try:
+                import wandb
+
+                wandb.log({name: wandb.Image(fig)})
+                logger.debug(f"Logged {name} to wandb")
+            except Exception as e:
+                logger.warning(f"Failed to log {name} to wandb: {e}")
+
     def _compute_features(self) -> None:
         """Compute sparse feature activations from the SAE."""
         import torch
+
         self.sae.eval()
         with torch.no_grad():
             activations_tensor = torch.from_numpy(self.activations).float()
@@ -131,14 +153,20 @@ class FeatureVisualizer:
         n_active = len(active_densities)
 
         stats_text = f"Dead features: {n_dead} ({n_dead/len(densities)*100:.1f}%)\n"
-        stats_text += f"Active features: {n_active} ({n_active/len(densities)*100:.1f}%)\n"
+        stats_text += (
+            f"Active features: {n_active} ({n_active/len(densities)*100:.1f}%)\n"
+        )
         stats_text += f"Median density: {np.median(active_densities):.2e}"
 
-        ax.text(0.95, 0.95, stats_text,
-                transform=ax.transAxes,
-                verticalalignment="top",
-                horizontalalignment="right",
-                bbox=dict(boxstyle="round", facecolor="wheat", alpha=0.5))
+        ax.text(
+            0.95,
+            0.95,
+            stats_text,
+            transform=ax.transAxes,
+            verticalalignment="top",
+            horizontalalignment="right",
+            bbox=dict(boxstyle="round", facecolor="wheat", alpha=0.5),
+        )
 
         plt.tight_layout()
 
@@ -146,6 +174,9 @@ class FeatureVisualizer:
             path = save_path or self.output_dir / "feature_density.png"
             plt.savefig(path, dpi=self.dpi, bbox_inches="tight")
             logger.info(f"Saved feature density plot to {path}")
+
+        # Log to wandb
+        self._log_figure_to_wandb(fig, "feature_density")
 
         return fig
 
@@ -196,16 +227,23 @@ class FeatureVisualizer:
         stats_text += f"Max activation: {max_act:.4f}\n"
         stats_text += f"Mean (active): {mean_act:.4f}"
 
-        ax.text(0.95, 0.95, stats_text,
-                transform=ax.transAxes,
-                verticalalignment="top",
-                horizontalalignment="right",
-                bbox=dict(boxstyle="round", facecolor="lightblue", alpha=0.5))
+        ax.text(
+            0.95,
+            0.95,
+            stats_text,
+            transform=ax.transAxes,
+            verticalalignment="top",
+            horizontalalignment="right",
+            bbox=dict(boxstyle="round", facecolor="lightblue", alpha=0.5),
+        )
 
         plt.tight_layout()
 
         if save_path or self.output_dir:
-            path = save_path or self.output_dir / f"activation_histogram_feature_{feature_idx}.png"
+            path = (
+                save_path
+                or self.output_dir / f"activation_histogram_feature_{feature_idx}.png"
+            )
             plt.savefig(path, dpi=self.dpi, bbox_inches="tight")
             logger.info(f"Saved activation histogram to {path}")
 
@@ -295,7 +333,7 @@ class FeatureVisualizer:
         top_values = values[top_indices]
 
         # Plot bar chart
-        bars = ax.barh(range(n_features), top_values[::-1])
+        _ = ax.barh(range(n_features), top_values[::-1])
         ax.set_yticks(range(n_features))
         ax.set_yticklabels([f"Feature {i}" for i in top_indices[::-1]])
         ax.set_xlabel(ylabel, fontsize=12)
@@ -340,10 +378,12 @@ class FeatureVisualizer:
         fig, ax = plt.subplots(figsize=(12, k * 0.5))
 
         # Plot bar chart
-        bars = ax.barh(range(k), top_values[::-1])
+        _ = ax.barh(range(k), top_values[::-1])
         ax.set_yticks(range(k))
         ax.set_xlabel("Activation Value", fontsize=12)
-        ax.set_title(f"Top {k} Activating Examples for Feature {feature_idx}", fontsize=14)
+        ax.set_title(
+            f"Top {k} Activating Examples for Feature {feature_idx}", fontsize=14
+        )
         ax.grid(True, axis="x", alpha=0.3)
 
         # Add text examples if available
@@ -468,6 +508,7 @@ class FeatureVisualizer:
         # 3. Decoder weights
         ax3 = fig.add_subplot(gs[1, :])
         import torch
+
         with torch.no_grad():
             decoder_weight = self.sae.decoder.weight[:, feature_idx].cpu().numpy()
 
@@ -486,9 +527,14 @@ class FeatureVisualizer:
         stats_text += f"Max Activation: {max_act:.4f}\n"
         stats_text += f"Decoder Norm: {np.linalg.norm(decoder_weight):.4f}"
 
-        fig.text(0.5, 0.02, stats_text,
-                 ha="center", fontsize=12,
-                 bbox=dict(boxstyle="round", facecolor="wheat", alpha=0.5))
+        fig.text(
+            0.5,
+            0.02,
+            stats_text,
+            ha="center",
+            fontsize=12,
+            bbox=dict(boxstyle="round", facecolor="wheat", alpha=0.5),
+        )
 
         plt.suptitle(f"Feature {feature_idx} Dashboard", fontsize=16)
 

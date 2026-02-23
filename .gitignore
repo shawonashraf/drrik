@@ -8,8 +8,20 @@ wheels/
 
 # Virtual environments
 .venv
+venv/
 
+# Environment variables
+.env
+.env.local
 
 # editors
 .vscode/
 .idea/
+
+# Drrik outputs
+visualizations/
+activations.pkl
+sae_*.pt
+
+# wandb
+wandb/

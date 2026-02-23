@@ -8,7 +8,7 @@ The autoencoder learns an overcomplete basis of features that are
 more interpretable than the original MLP neuron activations.
 """
 
-from typing import Optional, Tuple, Dict, Any, Union
+from typing import Optional, Tuple, Union
 from pathlib import Path
 
 import torch
@@ -20,7 +20,7 @@ from tqdm import tqdm
 
 from loguru import logger
 
-from drrik.config import SparseAutoencoderConfig
+from drrik.settings import WandbConfig
 
 
 class SparseAutoencoder(nn.Module):
@@ -168,7 +168,9 @@ class SparseAutoencoder(nn.Module):
         reconstructed = self.decode(features)
         return reconstructed, features
 
-    def loss(self, x: torch.Tensor, reconstructed: torch.Tensor, features: torch.Tensor) -> torch.Tensor:
+    def loss(
+        self, x: torch.Tensor, reconstructed: torch.Tensor, features: torch.Tensor
+    ) -> torch.Tensor:
         """
         Compute the loss with L1 regularization.
 
@@ -191,7 +193,8 @@ class SparseAutoencoder(nn.Module):
         if self.normalize_decoder:
             with torch.no_grad():
                 self.decoder.weight.copy_(
-                    self.decoder.weight / self.decoder.weight.norm(dim=0, keepdim=True).clamp(min=1e-8)
+                    self.decoder.weight
+                    / self.decoder.weight.norm(dim=0, keepdim=True).clamp(min=1e-8)
                 )
 
     def resample_dead_neurons(
@@ -230,10 +233,12 @@ class SparseAutoencoder(nn.Module):
 
             # Compute reconstruction loss for each sample
             reconstructed, _ = self.forward(activations)
-            sample_losses = F.mse_loss(reconstructed, activations, reduction="none").sum(dim=1)
+            sample_losses = F.mse_loss(
+                reconstructed, activations, reduction="none"
+            ).sum(dim=1)
 
             # Sample based on loss (higher loss = more likely to be resampled)
-            probs = sample_losses ** 2
+            probs = sample_losses**2
             probs = probs / probs.sum()
 
             # For each dead neuron, resample from a high-loss example
@@ -249,8 +254,14 @@ class SparseAutoencoder(nn.Module):
                 self.decoder.weight[:, dead_idx] = example_normalized
 
                 # Set encoder weight (smaller scale to prevent immediate firing)
-                avg_encoder_norm = self.encoder.weight[:, ~dead_mask].norm(dim=0).mean().item() if (~dead_mask).any() > 0 else 0.1
-                self.encoder.weight[dead_idx, :] = example_normalized * avg_encoder_norm * 0.2
+                avg_encoder_norm = (
+                    self.encoder.weight[:, ~dead_mask].norm(dim=0).mean().item()
+                    if (~dead_mask).any() > 0
+                    else 0.1
+                )
+                self.encoder.weight[dead_idx, :] = (
+                    example_normalized * avg_encoder_norm * 0.2
+                )
 
                 # Reset encoder bias
                 self.encoder_bias[dead_idx] = 0
@@ -271,6 +282,8 @@ class SparseAutoencoder(nn.Module):
         resample_interval: int = 10000,
         device: Optional[str] = None,
         verbose: bool = True,
+        wandb_config: Optional[WandbConfig] = None,
+        wandb_enabled: bool = True,
     ) -> "SparseAutoencoder":
         """
         Train the sparse autoencoder on MLP activations.
@@ -285,10 +298,33 @@ class SparseAutoencoder(nn.Module):
             resample_interval: Steps between resampling checks
             device: Device to train on (cuda/cpu). If None, auto-detect
             verbose: Whether to show progress bars
+            wandb_config: Optional WandbConfig for experiment tracking
+            wandb_enabled: If True and wandb_config is None, create default WandbConfig
 
         Returns:
             self (trained model)
         """
+        # Setup wandb if enabled
+        wandb_logger = None
+        if wandb_enabled:
+            if wandb_config is None:
+                wandb_logger = WandbConfig(
+                    config={
+                        "activation_dim": self.activation_dim,
+                        "hidden_dim": self.hidden_dim,
+                        "expansion_factor": self.hidden_dim / self.activation_dim,
+                        "l1_coefficient": self.l1_coefficient,
+                        "batch_size": batch_size,
+                        "learning_rate": learning_rate,
+                        "num_epochs": num_epochs,
+                    }
+                )
+            else:
+                wandb_logger = wandb_config
+
+            if wandb_logger:
+                wandb_logger.initialize()
+
         # Determine device
         if device is None:
             device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -365,7 +401,9 @@ class SparseAutoencoder(nn.Module):
                         decoder_grad = self.decoder.weight.grad
 
                         # Compute projection
-                        projection = (decoder_grad * decoder_w).sum(dim=0, keepdim=True) * decoder_w
+                        projection = (decoder_grad * decoder_w).sum(
+                            dim=0, keepdim=True
+                        ) * decoder_w
                         self.decoder.weight.grad = decoder_grad - projection
 
                 optimizer.step()
@@ -381,7 +419,10 @@ class SparseAutoencoder(nn.Module):
                 global_step += 1
 
                 # Resample dead neurons
-                if resample_dead_neurons and n_steps_since_resample >= resample_interval:
+                if (
+                    resample_dead_neurons
+                    and n_steps_since_resample >= resample_interval
+                ):
                     self.resample_dead_neurons(batch)
                     n_steps_since_resample = 0
 
@@ -399,15 +440,31 @@ class SparseAutoencoder(nn.Module):
                 val_loss = F.mse_loss(val_reconstructed, val_data_tensor).item()
                 val_l0 = (val_features > 0).sum(dim=1).float().mean().item()
 
+            # Log to wandb
+            if wandb_logger:
+                wandb_logger.log_metrics(
+                    {
+                        "epoch": epoch + 1,
+                        "train_loss": avg_loss,
+                        "train_l0_norm": avg_l0,
+                        "val_loss": val_loss,
+                        "val_l0_norm": val_l0,
+                        "learning_rate": learning_rate,
+                    },
+                    step=epoch + 1,
+                )
+
             if verbose:
                 if pbar:
                     pbar.update(1)
-                    pbar.set_postfix({
-                        "loss": f"{avg_loss:.6f}",
-                        "val_loss": f"{val_loss:.6f}",
-                        "L0": f"{avg_l0:.2f}",
-                        "val_L0": f"{val_l0:.2f}",
-                    })
+                    pbar.set_postfix(
+                        {
+                            "loss": f"{avg_loss:.6f}",
+                            "val_loss": f"{val_loss:.6f}",
+                            "L0": f"{avg_l0:.2f}",
+                            "val_L0": f"{val_l0:.2f}",
+                        }
+                    )
                 else:
                     logger.info(
                         f"Epoch {epoch+1}/{num_epochs}: "
@@ -417,6 +474,33 @@ class SparseAutoencoder(nn.Module):
 
         if pbar:
             pbar.close()
+
+        # Finalize wandb and log summary metrics
+        if wandb_logger:
+            # Log final feature densities
+            densities = self.get_feature_density(activations.cpu().numpy())
+            n_dead = (densities == 0).sum()
+            n_active = (densities > 0).sum()
+
+            wandb_logger.log_metrics(
+                {
+                    "final_train_loss": self.training_losses[-1],
+                    "final_val_loss": val_loss,
+                    "final_l0_norm": self.training_l0_norms[-1],
+                    "final_val_l0_norm": val_l0,
+                    "n_dead_features": int(n_dead),
+                    "n_active_features": int(n_active),
+                    "feature_sparsity": float(n_active / len(densities)),
+                }
+            )
+
+            # Log feature density histogram
+            wandb_logger.log_histogram(densities, "feature_density_histogram")
+
+            logger.info(f"wandb run URL: {wandb_logger.get_run_url()}")
+
+            # Finalize wandb (close the run)
+            wandb_logger.finalize()
 
         logger.info("Training complete!")
         return self
