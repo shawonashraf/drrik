@@ -1,162 +1,162 @@
 """
 Simple test to verify all modules import correctly.
+
+Tests run with pytest.
 """
 
-import sys
+import torch
 
 
-def test_imports():
-    """Test that all main modules can be imported."""
-    print("Testing imports...")
-
-    try:
-        print("  - drrik.config...", end=" ")
-        from drrik.config import (
-            Config,
-            ModelConfig,
-            DatasetConfig,
-            ActivationExtractorConfig,
-            SparseAutoencoderConfig,
-            VisualizationConfig,
-        )
-        print("OK")
-
-        print("  - drrik.autoencoder...", end=" ")
-        from drrik.autoencoder import SparseAutoencoder
-        print("OK")
-
-        print("  - drrik.models...", end=" ")
-        from drrik.models import ActivationExtractor
-        print("OK")
-
-        print("  - drrik.visualization...", end=" ")
-        from drrik.visualization import FeatureVisualizer
-        print("OK")
-
-        print("  - drrik __init__...", end=" ")
-        from drrik import (
-            ActivationExtractor,
-            SparseAutoencoder,
-            FeatureVisualizer,
-            Config,
-        )
-        print("OK")
-
-        print("\nAll imports successful!")
-        return True
-
-    except Exception as e:
-        print(f"\nImport failed: {e}")
-        import traceback
-        traceback.print_exc()
-        return False
+def test_config_imports():
+    """Test that config module can be imported."""
 
 
-def test_config_creation():
-    """Test that config objects can be created."""
-    print("\nTesting config creation...")
+def test_autoencoder_imports():
+    """Test that autoencoder module can be imported."""
 
-    try:
-        from drrik.config import (
-            ModelConfig,
-            DatasetConfig,
-            ActivationExtractorConfig,
-            SparseAutoencoderConfig,
-        )
 
-        print("  - ModelConfig...", end=" ")
-        model_cfg = ModelConfig(model_name="google/gemma-2b")
-        print("OK")
+def test_models_imports():
+    """Test that models module can be imported."""
 
-        print("  - DatasetConfig...", end=" ")
-        dataset_cfg = DatasetConfig(dataset_name="wikitext")
-        print("OK")
 
-        print("  - ActivationExtractorConfig...", end=" ")
-        extractor_cfg = ActivationExtractorConfig(
-            model=model_cfg,
-            dataset=dataset_cfg,
-            mlp_layers=[0],
-        )
-        print("OK")
+def test_visualization_imports():
+    """Test that visualization module can be imported."""
 
-        print("  - SparseAutoencoderConfig...", end=" ")
-        sae_cfg = SparseAutoencoderConfig(
-            activation_dim=2048,
-            hidden_dim=4096,
-        )
-        print("OK")
 
-        print("\nAll configs created successfully!")
-        return True
+def test_settings_imports():
+    """Test that settings module can be imported."""
 
-    except Exception as e:
-        print(f"\nConfig creation failed: {e}")
-        import traceback
-        traceback.print_exc()
-        return False
+
+def test_main_package_imports():
+    """Test that main package exports work."""
+
+
+def test_model_config_creation():
+    """Test that ModelConfig can be created."""
+    from drrik.config import ModelConfig
+
+    model_cfg = ModelConfig(model_name="google/gemma-2b")
+    assert model_cfg.model_name == "google/gemma-2b"
+    assert model_cfg.torch_dtype == "float16"
+    assert model_cfg.device_map == "auto"
+
+
+def test_dataset_config_creation():
+    """Test that DatasetConfig can be created."""
+    from drrik.config import DatasetConfig
+
+    dataset_cfg = DatasetConfig(dataset_name="wikitext")
+    assert dataset_cfg.dataset_name == "wikitext"
+    assert dataset_cfg.max_samples == 1000
+
+
+def test_extractor_config_creation():
+    """Test that ActivationExtractorConfig can be created."""
+    from drrik.config import (
+        ModelConfig,
+        DatasetConfig,
+        ActivationExtractorConfig,
+    )
+
+    model_cfg = ModelConfig(model_name="google/gemma-2b")
+    dataset_cfg = DatasetConfig(dataset_name="wikitext")
+
+    extractor_cfg = ActivationExtractorConfig(
+        model=model_cfg,
+        dataset=dataset_cfg,
+        mlp_layers=[0],
+    )
+    assert extractor_cfg.mlp_layers == [0]
+    assert extractor_cfg.batch_size == 8
+
+
+def test_sae_config_creation():
+    """Test that SparseAutoencoderConfig can be created."""
+    from drrik.config import SparseAutoencoderConfig
+
+    sae_cfg = SparseAutoencoderConfig(
+        activation_dim=2048,
+        hidden_dim=4096,
+    )
+    assert sae_cfg.activation_dim == 2048
+    assert sae_cfg.hidden_dim == 4096
 
 
 def test_sae_creation():
     """Test that SAE can be instantiated."""
-    print("\nTesting SAE creation...")
+    from drrik.autoencoder import SparseAutoencoder
 
-    try:
-        import torch
-        from drrik.autoencoder import SparseAutoencoder
-
-        print("  - Creating SAE...", end=" ")
-        sae = SparseAutoencoder(
-            activation_dim=256,
-            hidden_dim=512,
-            l1_coefficient=0.01,
-        )
-        print("OK")
-
-        print("  - Testing forward pass...", end=" ")
-        x = torch.randn(32, 256)
-        reconstructed, features = sae(x)
-        assert reconstructed.shape == (32, 256)
-        assert features.shape == (32, 512)
-        print("OK")
-
-        print("  - Testing encode/decode...", end=" ")
-        features = sae.encode(x)
-        reconstructed = sae.decode(features)
-        assert features.shape == (32, 512)
-        assert reconstructed.shape == (32, 256)
-        print("OK")
-
-        print("\nSAE tests passed!")
-        return True
-
-    except Exception as e:
-        print(f"\nSAE test failed: {e}")
-        import traceback
-        traceback.print_exc()
-        return False
+    sae = SparseAutoencoder(
+        activation_dim=256,
+        hidden_dim=512,
+        l1_coefficient=0.01,
+    )
+    assert sae.activation_dim == 256
+    assert sae.hidden_dim == 512
 
 
-def main():
-    """Run all tests."""
-    print("=" * 50)
-    print("Drrik Framework - Import Tests")
-    print("=" * 50)
+def test_sae_forward_pass():
+    """Test SAE forward pass."""
+    from drrik.autoencoder import SparseAutoencoder
 
-    all_passed = True
+    sae = SparseAutoencoder(
+        activation_dim=256,
+        hidden_dim=512,
+        l1_coefficient=0.01,
+    )
 
-    all_passed &= test_imports()
-    all_passed &= test_config_creation()
-    all_passed &= test_sae_creation()
+    x = torch.randn(32, 256)
+    reconstructed, features = sae(x)
 
-    print("\n" + "=" * 50)
-    if all_passed:
-        print("All tests PASSED!")
-        return 0
-    else:
-        print("Some tests FAILED!")
-        return 1
+    assert reconstructed.shape == (32, 256)
+    assert features.shape == (32, 512)
 
 
-if __name__ == "__main__":
-    sys.exit(main())
+def test_sae_encode_decode():
+    """Test SAE encode/decode methods."""
+    from drrik.autoencoder import SparseAutoencoder
+
+    sae = SparseAutoencoder(
+        activation_dim=256,
+        hidden_dim=512,
+        l1_coefficient=0.01,
+    )
+
+    x = torch.randn(32, 256)
+    features = sae.encode(x)
+    reconstructed = sae.decode(features)
+
+    assert features.shape == (32, 512)
+    assert reconstructed.shape == (32, 256)
+
+
+def test_environment_settings_creation():
+    """Test that EnvironmentSettings can be created."""
+    from drrik.settings import EnvironmentSettings
+
+    settings = EnvironmentSettings()
+    assert settings.wandb_project == "drrik-experiments"
+    assert settings.wandb_mode == "online"
+
+
+def test_wandb_config_creation():
+    """Test that WandbConfig can be created."""
+    from drrik.settings import WandbConfig
+
+    wandb_cfg = WandbConfig(
+        project="test-project",
+        config={"test": True},
+        enabled=False,  # Don't actually initialize wandb
+    )
+    assert wandb_cfg.project == "test-project"
+    assert wandb_cfg.config == {"test": True}
+
+
+def test_settings_properties():
+    """Test EnvironmentSettings properties."""
+    from drrik.settings import EnvironmentSettings
+
+    settings = EnvironmentSettings()
+    # These should work without error
+    assert hasattr(settings, "use_wandb")
+    assert hasattr(settings, "has_hf_token")

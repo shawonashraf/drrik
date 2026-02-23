@@ -1,108 +1,79 @@
 """
 Test wandb and settings integration.
-"""
 
-import sys
+Tests run with pytest.
+"""
 
 
 def test_settings_imports():
     """Test settings module imports."""
-    print("Testing settings imports...")
-
-    try:
-        print("  - EnvironmentSettings...", end=" ")
-        print("OK")
-
-        print("  - WandbConfig...", end=" ")
-        print("OK")
-
-        print("  - get_settings...", end=" ")
-        print("OK")
-
-        print("\nAll settings imports successful!")
-        return True
-
-    except Exception as e:
-        print(f"\nSettings import failed: {e}")
-        import traceback
-
-        traceback.print_exc()
-        return False
 
 
 def test_settings_creation():
     """Test that settings can be created."""
-    print("\nTesting settings creation...")
+    from drrik.settings import EnvironmentSettings, WandbConfig
 
-    try:
-        from drrik.settings import EnvironmentSettings, WandbConfig
+    env_settings = EnvironmentSettings()
+    assert env_settings.wandb_project == "drrik-experiments"
+    assert env_settings.wandb_mode == "online"
 
-        print("  - EnvironmentSettings...", end=" ")
-        env_settings = EnvironmentSettings()
-        print("OK")
-
-        print("  - WandbConfig...", end=" ")
-        _ = WandbConfig(
-            project="test-project",
-            config={"test": True},
-        )
-        print("OK")
-
-        print("  - Checking properties...", end=" ")
-        print(f"use_wandb={env_settings.use_wandb}")
-        print(f"has_hf_token={env_settings.has_hf_token}")
-        print("OK")
-
-        print("\nAll settings created successfully!")
-        return True
-
-    except Exception as e:
-        print(f"\nSettings creation failed: {e}")
-        import traceback
-
-        traceback.print_exc()
-        return False
+    wandb_cfg = WandbConfig(
+        project="test-project",
+        config={"test": True},
+        enabled=False,
+    )
+    assert wandb_cfg.project == "test-project"
 
 
-def test_main_imports():
+def test_environment_settings_properties():
+    """Test EnvironmentSettings properties."""
+    from drrik.settings import EnvironmentSettings
+
+    settings = EnvironmentSettings()
+    # These should work without error
+    assert isinstance(settings.use_wandb, bool)
+    assert isinstance(settings.has_hf_token, bool)
+
+
+def test_wandb_config_disabled():
+    """Test WandbConfig with wandb disabled."""
+    from drrik.settings import WandbConfig
+
+    wandb_config = WandbConfig(
+        enabled=False,  # Explicitly disable
+    )
+    assert wandb_config.enabled is False
+
+
+def test_wandb_config_properties():
+    """Test WandbConfig methods when disabled."""
+    from drrik.settings import WandbConfig
+
+    wandb_config = WandbConfig(
+        project="test-project",
+        config={"test": True},
+        enabled=False,
+    )
+
+    # These should return None or not crash when disabled
+    assert wandb_config.get_run_url() is None
+    assert wandb_config.get_run_id() is None
+
+    # Logging methods should not crash
+    wandb_config.log_metrics({"test": 1.0})
+    wandb_config.log_histogram([1, 2, 3], "test")
+
+
+def test_get_settings_singleton():
+    """Test that get_settings returns a singleton."""
+    from drrik.settings import get_settings, EnvironmentSettings
+
+    settings1 = get_settings()
+    settings2 = get_settings()
+    # Should return the same instance
+    assert settings1 is settings2
+    assert isinstance(settings1, EnvironmentSettings)
+
+
+def test_main_package_exports():
     """Test main package exports."""
-    print("\nTesting main package exports...")
-
-    try:
-        print("  - Importing from drrik...", end=" ")
-        print("OK")
-
-        print("\nAll main imports successful!")
-        return True
-
-    except Exception as e:
-        print(f"\nMain imports failed: {e}")
-        import traceback
-
-        traceback.print_exc()
-        return False
-
-
-def main():
-    """Run all tests."""
-    print("=" * 50)
-    print("Drrik Framework - Settings Integration Tests")
-    print("=" * 50)
-
-    all_passed = True
-
-    all_passed &= test_settings_imports()
-    all_passed &= test_settings_creation()
-    all_passed &= test_main_imports()
-
-    print("\n" + "=" * 50)
-    if all_passed:
-        print("All tests PASSED!")
-        return 0
-    else:
-        print("Some tests FAILED!")
-        return 1
-
-
-if __name__ == "__main__":
-    sys.exit(main())
