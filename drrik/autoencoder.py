@@ -201,6 +201,7 @@ class SparseAutoencoder(nn.Module):
         self,
         activations: torch.Tensor,
         dead_threshold: float = 1e-8,
+        dead_mask: Optional[torch.Tensor] = None,
     ) -> int:
         """
         Resample dead neurons that haven't fired recently.
@@ -213,6 +214,9 @@ class SparseAutoencoder(nn.Module):
         Args:
             activations: Batch of activations to use for resampling
             dead_threshold: Activation threshold below which a neuron is considered dead
+            dead_mask: Pre-computed boolean mask of dead neurons. If None, computed
+                       from the current batch. When provided, uses a sliding window
+                       approach for more robust dead neuron detection.
 
         Returns:
             Number of neurons resampled
@@ -221,9 +225,10 @@ class SparseAutoencoder(nn.Module):
             # Get feature activations
             features = self.encode(activations)
 
-            # Find dead neurons (those with very low activation)
-            neuron_activity = features.abs().sum(dim=0)  # (hidden_dim,)
-            dead_mask = neuron_activity < dead_threshold
+            # Find dead neurons
+            if dead_mask is None:
+                neuron_activity = features.abs().sum(dim=0)
+                dead_mask = neuron_activity < dead_threshold
             n_dead = dead_mask.sum().item()
 
             if n_dead == 0:
@@ -280,6 +285,8 @@ class SparseAutoencoder(nn.Module):
         validation_split: float = 0.1,
         resample_dead_neurons: bool = True,
         resample_interval: int = 10000,
+        dead_threshold: float = 1e-8,
+        window_size: int = 100,
         device: Optional[str] = None,
         verbose: bool = True,
         wandb_config: Optional[WandbConfig] = None,
@@ -296,6 +303,8 @@ class SparseAutoencoder(nn.Module):
             validation_split: Fraction of data to use for validation
             resample_dead_neurons: Whether to resample dead neurons during training
             resample_interval: Steps between resampling checks
+            dead_threshold: Activation threshold below which a neuron is considered dead
+            window_size: Number of recent batches to track for dead neuron detection
             device: Device to train on (cuda/cpu). If None, auto-detect
             verbose: Whether to show progress bars
             wandb_config: Optional WandbConfig for experiment tracking
@@ -375,6 +384,9 @@ class SparseAutoencoder(nn.Module):
         n_steps_since_resample = 0
         global_step = 0
 
+        # Sliding window for tracking neuron activity across batches
+        neuron_activity_window = []
+
         if verbose:
             pbar = tqdm(total=num_epochs, desc="Training SAE")
         else:
@@ -389,6 +401,12 @@ class SparseAutoencoder(nn.Module):
 
                 # Forward pass
                 reconstructed, features = self.forward(batch)
+
+                # Track neuron activity for sliding window dead detection
+                neuron_activity = features.abs().sum(dim=0)
+                neuron_activity_window.append(neuron_activity)
+                if len(neuron_activity_window) > window_size:
+                    neuron_activity_window.pop(0)
 
                 # Compute loss
                 loss = self.loss(batch, reconstructed, features)
@@ -422,12 +440,22 @@ class SparseAutoencoder(nn.Module):
                 n_steps_since_resample += 1
                 global_step += 1
 
-                # Resample dead neurons
+                # Resample dead neurons using sliding window
                 if (
                     resample_dead_neurons
                     and n_steps_since_resample >= resample_interval
                 ):
-                    self.resample_dead_neurons(batch)
+                    if len(neuron_activity_window) > 0:
+                        avg_activity = torch.stack(neuron_activity_window).mean(dim=0)
+                        window_dead_mask = avg_activity < dead_threshold
+                    else:
+                        window_dead_mask = None
+
+                    n_resampled = self.resample_dead_neurons(
+                        batch, dead_threshold=dead_threshold, dead_mask=window_dead_mask
+                    )
+                    if n_resampled > 0:
+                        neuron_activity_window.clear()
                     n_steps_since_resample = 0
 
             # Average metrics
@@ -471,7 +499,7 @@ class SparseAutoencoder(nn.Module):
                     )
                 else:
                     logger.info(
-                        f"Epoch {epoch+1}/{num_epochs}: "
+                        f"Epoch {epoch + 1}/{num_epochs}: "
                         f"loss={avg_loss:.6f}, val_loss={val_loss:.6f}, "
                         f"L0={avg_l0:.2f}, val_L0={val_l0:.2f}"
                     )
