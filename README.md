@@ -114,14 +114,15 @@ The CLI uses YAML configuration files for easy setup:
 # Model configuration
 model_name: "google/gemma-2b"
 torch_dtype: "float16"
-device_map: "auto"
+device_map: "cpu"
 
 # Dataset configuration
 dataset_name: "wikitext"
 dataset_config: "wikitext-2-raw-v1"
 split: "train"
 num_samples: 1000
-batch_size: 8
+max_length: 512
+extraction_batch_size: 8
 
 # Activation extraction
 mlp_layers: [0]
@@ -132,14 +133,19 @@ hidden_dim: 16384  # 8x expansion
 l1_coefficient: 0.01
 learning_rate: 0.0001
 num_epochs: 50
+training_batch_size: 256
 validation_split: 0.1
 resample_dead_neurons: true
 
 # Visualization
 n_features_to_visualize: 10
 
+# Hardware configuration
+extraction_device: "cpu"
+training_device: "mps"
+
 # Wandb integration (optional)
-wandb_enabled: true
+wandb_enabled: false
 wandb_project: "drrik-experiments"
 
 # Output
@@ -211,6 +217,8 @@ Any HuggingFace transformer model with MLP layers. Recommended for 8GB VRAM:
 - `google/gemma-2b` (2B parameters)
 - `microsoft/phi-2` (2.7B parameters)
 - `TinyLlama/TinyLlama-1.1B-Chat-v1.0` (1.1B parameters)
+
+> **Note for Apple Silicon users**: Models like gemma-2b have internal weight matrices that exceed MPS kernel limits. Use `device_map: "cpu"` for activation extraction and `training_device: "mps"` for SAE training.
 
 ### Supported Datasets
 

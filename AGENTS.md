@@ -14,9 +14,30 @@ Agent documentation for the Drrik framework.
 **Key Documentation Sources**:
 
 - [PyTorch 2.11](https://docs.pytorch.org/docs/2.11/index.html)
-- [nnsight](https://nnsight.net/documentation/)
+- [nnsight 0.5.15](https://nnsight.net/documentation/)
 
 **No Speculative Code**: Do not write code based on internal reasoning alone. If the codebase is unclear and documentation cannot be found, ask the user rather than guessing.
+
+## Important Technical Notes
+
+### nnsight API (v0.5.15)
+- Use `LanguageModel` (not `NNsight`) for loading HuggingFace models. `NNsight` extends `Envoy` directly and doesn't handle HuggingFace kwargs like `revision`.
+- Access model layers through the model object (e.g., `model.model.layers[0].mlp.output.save()`), not through the tracer. The tracer context manager is not subscriptable.
+- `.save()` returns tensors directly — no `.value` accessor needed.
+- Initialize variables (like output lists) **before** the `with model.trace(...)` block, not inside it.
+
+### Device Configuration
+- `device_map` controls where the HuggingFace model is loaded (used by nnsight/transformers).
+- `extraction_device` and `training_device` are separate — extraction may need CPU on Apple Silicon due to MPS kernel limits on large weight matrices, while SAE training can use MPS.
+- Use `self.to(device)` (not `self = self.to(device)`) for moving `nn.Module` to device — reassignment breaks in-place movement.
+
+### Config Key Naming
+- `extraction_batch_size` for activation extraction batching.
+- `training_batch_size` for SAE training batching.
+- These replace the previous ambiguous `batch_size` key.
+
+### datasets Library
+- `datasets.Dataset.map()` stores results as Python lists even with `return_tensors="pt"` in the tokenizer. Use `torch.tensor()` (not `torch.stack()`) to convert.
 
 ## Project Overview
 
@@ -121,5 +142,5 @@ Dev: pytest (testing), ruff (linting/formatting), pre-commit (git hooks)
 
 ## Entry Points
 
-- **CLI**: `drrik` command → [cli.py:598](drrik/cli.py#L598)
+- **CLI**: `drrik` command → [cli.py:583](drrik/cli.py#L583)
 - **Python API**: `from drrik import ActivationExtractor, SparseAutoencoder, FeatureVisualizer`
