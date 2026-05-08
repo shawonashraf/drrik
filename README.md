@@ -234,7 +234,7 @@ Following the Anthropic paper:
 - **L1 sparsity**: Encourages sparse feature activations
 - **Decoder normalization**: Prevents scaling collapse
 - **Pre-encoder bias**: As used in the paper
-- **Dead neuron resampling**: Reinitializes inactive neurons during training
+- **Dead neuron resampling**: Reinitializes inactive neurons during training using a sliding window of recent batches for robust detection
 
 ### Wandb Integration
 
@@ -287,11 +287,11 @@ All plots can be saved locally and optionally logged to wandb.
 
 ```python
 extractor = ActivationExtractor(
-    model_name: str = "google/gemma-2b",
-    dataset_name: str = "wikitext",
-    mlp_layers: List[int] = [0],
-    num_samples: int = 1000,
-    batch_size: int = 8,
+    model_name="google/gemma-2b",
+    dataset_name="wikitext",
+    num_samples=1000,
+    mlp_layers=[0],
+    batch_size=8,
 )
 
 activations, metadata = extractor.extract()
@@ -312,6 +312,9 @@ sae.fit(
     num_epochs: int = 100,
     learning_rate: float = 1e-4,
     resample_dead_neurons: bool = True,
+    resample_interval: int = 10000,
+    dead_threshold: float = 1e-8,
+    window_size: int = 100,
     wandb_config: Optional[WandbConfig] = None,
     wandb_enabled: bool = False,
 )

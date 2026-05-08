@@ -34,7 +34,25 @@ Agent documentation for the Drrik framework.
 ### Config Key Naming
 - `extraction_batch_size` for activation extraction batching.
 - `training_batch_size` for SAE training batching.
-- These replace the previous ambiguous `batch_size` key.
+- `num_samples` in `DatasetConfig` — no default, must be explicitly provided. Replaced the old `max_samples` field.
+
+### Pydantic v2 Migration
+- Use `model_config = ConfigDict(...)` instead of `class Config:` inner class.
+- `ActivationExtractorConfig.model` and `ActivationExtractorConfig.dataset` are `Optional` — no default factories.
+
+### ActivationExtractor Initialization
+- `ActivationExtractor.__init__` accepts flat kwargs (e.g., `model_name`, `num_samples`) and builds nested `ModelConfig`/`DatasetConfig` automatically.
+- When passing a `config` object, nested configs must be fully constructed (no partial overrides via `model_copy(update=kwargs)`).
+
+### Dead Neuron Resampling (Sliding Window)
+- `SparseAutoencoder.fit()` tracks neuron activity across a sliding window of recent batches (`window_size` parameter, default 100).
+- Dead neurons are identified by average activity across the window, not a single batch.
+- `resample_dead_neurons()` accepts an optional `dead_mask` parameter for pre-computed masks.
+- Window is cleared after resampling to start fresh tracking.
+- New `fit()` parameters: `dead_threshold` (default `1e-8`), `window_size` (default `100`).
+
+### Wandb API
+- Use `run.url` property instead of the deprecated `get_url()` method.
 
 ### datasets Library
 - `datasets.Dataset.map()` stores results as Python lists even with `return_tensors="pt"` in the tokenizer. Use `torch.tensor()` (not `torch.stack()`) to convert.
@@ -68,7 +86,7 @@ drrik/
 
 ### [autoencoder.py](drrik/autoencoder.py)
 - **SparseAutoencoder**: Overcomplete basis SAE with L1 regularization
-- Implements paper architecture: pre-encoder bias, decoder normalization, dead neuron resampling
+- Implements paper architecture: pre-encoder bias, decoder normalization, sliding window dead neuron resampling
 - Training loop with validation, wandb logging, gradient tricks
 
 ### [visualization.py](drrik/visualization.py)
@@ -77,7 +95,7 @@ drrik/
 
 ### [config.py](drrik/config.py)
 - Pydantic configs: `ModelConfig`, `DatasetConfig`, `ActivationExtractorConfig`, `SparseAutoencoderConfig`
-- Type-safe, validated configuration with defaults
+- Type-safe, validated configuration — `DatasetConfig.num_samples` has no default and must be explicitly provided
 
 ### [settings.py](drrik/settings.py)
 - `EnvironmentSettings`: Loads HF/WANDB API keys from .env
@@ -90,10 +108,13 @@ drrik/
 ## Common Tasks
 
 ### Adding New Model Architecture Support
-Edit [models.py:175](drrik/models.py#L175) in `_get_mlp_layer_name()` to add the MLP path pattern.
+Edit [models.py:208](drrik/models.py#L208) in `_get_mlp_layer_name()` to add the MLP path pattern.
 
 ### Modifying SAE Architecture
 Edit [autoencoder.py:58](drrik/autoencoder.py#L58) in `SparseAutoencoder.__init__()`.
+
+### Modifying Dead Neuron Resampling
+Edit [autoencoder.py:200](drrik/autoencoder.py#L200) in `resample_dead_neurons()` and [autoencoder.py:279](drrik/autoencoder.py#L279) in `fit()`.
 
 ### Adding New Visualizations
 Add method to [visualization.py:26](drrik/visualization.py#L26) in `FeatureVisualizer` class.
@@ -142,5 +163,5 @@ Dev: pytest (testing), ruff (linting/formatting), pre-commit (git hooks)
 
 ## Entry Points
 
-- **CLI**: `drrik` command → [cli.py:583](drrik/cli.py#L583)
+- **CLI**: `drrik` command → [cli.py:682](drrik/cli.py#L682)
 - **Python API**: `from drrik import ActivationExtractor, SparseAutoencoder, FeatureVisualizer`
