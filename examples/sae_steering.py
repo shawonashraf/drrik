@@ -23,6 +23,7 @@ Usage:
 """
 
 import os
+import warnings
 from pathlib import Path
 
 import numpy as np
@@ -30,6 +31,12 @@ import torch
 from loguru import logger
 
 from drrik import SAESteering, SparseAutoencoder
+
+# Suppress macOS multiprocessing semaphore leak warnings from PyTorch/nnsight
+warnings.filterwarnings(
+    "ignore",
+    message="resource_tracker: There appear to be .* leaked semaphore objects",
+)
 
 # Default paths matching the drrik_output directory structure
 DEFAULT_SAE_PATH = Path("drrik_output/models/sae_model.pt")
