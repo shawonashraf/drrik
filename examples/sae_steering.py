@@ -104,9 +104,9 @@ def analyze_features(
     n_dead = (densities == 0).sum()
     n_active = (densities > 0).sum()
 
-    logger.info("\nFeature statistics:")
-    logger.info(f"  Dead features: {n_dead}/{len(densities)}")
-    logger.info(f"  Active features: {n_active}/{len(densities)}")
+    logger.info("Feature statistics:")
+    logger.info(f"Dead features: {n_dead}/{len(densities)}")
+    logger.info(f"Active features: {n_active}/{len(densities)}")
 
     active_mask = densities > 0
     active_indices = np.where(active_mask)[0]
@@ -121,11 +121,9 @@ def analyze_features(
             }
         )
 
-    logger.info("\nTop 10 features by density:")
+    logger.info("Top 10 features by density:")
     for i, f in enumerate(features[:10]):
-        logger.info(
-            f"  {i + 1}. Feature {f['feature_idx']}: density={f['density']:.4f}"
-        )
+        logger.info(f"{i + 1}. Feature {f['feature_idx']}: density={f['density']:.4f}")
 
     return features
 
@@ -134,8 +132,8 @@ def demo_baseline_vs_steered(
     steering: SAESteering,
     prompt: str,
     feature_idx: int,
-    strengths: list = None,
-    max_new_tokens: int = 30,
+    strengths: list = [],
+    max_new_tokens: int = 4096,
 ) -> dict:
     """
     Compare baseline generation against steered outputs at multiple strengths.
@@ -156,7 +154,7 @@ def demo_baseline_vs_steered(
     results = {}
     for s in strengths:
         label = "baseline" if s == 0.0 else f"strength_{s}"
-        logger.info(f"  Generating {label}...")
+        logger.info(f"Generating :: {label}")
         generated = steering.generate(
             text=prompt,
             feature_idx=feature_idx,
@@ -174,7 +172,7 @@ def demo_multi_feature_steering(
     steering: SAESteering,
     prompt: str,
     features: list,
-    max_new_tokens: int = 30,
+    max_new_tokens: int = 4096,
 ) -> str:
     """
     Generate text by combining multiple feature steering directions.
@@ -191,7 +189,7 @@ def demo_multi_feature_steering(
     feature_indices = [f["feature_idx"] for f in features[:2]]
     strengths = [1.0] * len(feature_indices)
 
-    logger.info(f"  Combining features {feature_indices} with strengths {strengths}")
+    logger.info(f"Combining features {feature_indices} with strengths {strengths}")
 
     result = steering.generate(
         text=prompt,
@@ -220,20 +218,18 @@ def demo_steering_directions(
         feature_idx = f["feature_idx"]
         direction = steering.get_steering_direction(feature_idx, normalize=True)
 
-        logger.info(f"\n  Feature {feature_idx}:")
-        logger.info(f"    Dimension: {direction.shape[0]}")
-        logger.info(f"    L2 norm: {np.linalg.norm(direction):.4f}")
-        logger.info(f"    Max positive: {direction.max():.4f}")
-        logger.info(f"    Max negative: {direction.min():.4f}")
+        logger.info(f"Feature {feature_idx}:")
+        logger.info(f"Dimension: {direction.shape[0]}")
+        logger.info(f"L2 norm: {np.linalg.norm(direction):.4f}")
+        logger.info(f"Max positive: {direction.max():.4f}")
+        logger.info(f"Max negative: {direction.min():.4f}")
 
 
 def main():
     """Run the SAE steering demonstration."""
     torch.manual_seed(42)
 
-    logger.info("=" * 60)
     logger.info("SAE Activation Steering Demo")
-    logger.info("=" * 60)
 
     # Load pre-trained artifacts
     sae, activations = load_artifacts()
@@ -262,14 +258,12 @@ def main():
     else:
         selected = [{"feature_idx": i} for i in range(3)]
 
-    logger.info("\nSelected features for steering:")
+    logger.info("Selected features for steering:")
     for i, f in enumerate(selected):
-        logger.info(f"  Feature {i + 1}: idx={f['feature_idx']}")
+        logger.info(f"Feature {i + 1}: idx={f['feature_idx']}")
 
     # Demo 1: Baseline vs steered generation
-    logger.info("\n" + "=" * 60)
     logger.info("Demo 1: Baseline vs Steered Generation")
-    logger.info("=" * 60)
 
     prompts = [
         "The weather is",
@@ -278,48 +272,40 @@ def main():
     ]
 
     for prompt in prompts:
-        logger.info(f"\nPrompt: '{prompt}'")
+        logger.info(f"Prompt: '{prompt}'")
         for feat in selected:
             feature_idx = feat["feature_idx"]
             results = demo_baseline_vs_steered(
-                steering, prompt, feature_idx, max_new_tokens=25
+                steering, prompt, feature_idx, max_new_tokens=4096
             )
-            logger.info(f"\n  --- Feature {feature_idx} ---")
+            logger.info(f"Feature :: {feature_idx}")
             for label, text in results.items():
-                logger.info(f"    {label}: {text}")
+                logger.info(f"{label}: {text}")
 
     # Demo 2: Multi-feature steering
-    logger.info("\n" + "=" * 60)
     logger.info("Demo 2: Multi-Feature Steering")
-    logger.info("=" * 60)
 
     if len(selected) >= 2:
         prompt = prompts[0]
-        logger.info(f"\nPrompt: '{prompt}'")
+        logger.info(f"Prompt: '{prompt}'")
 
         result = demo_multi_feature_steering(
-            steering, prompt, selected, max_new_tokens=25
+            steering, prompt, selected, max_new_tokens=4096
         )
-        logger.info(f"  Combined result: {result}")
+        logger.info(f"Combined result: {result}")
 
     # Demo 3: Steering direction analysis
-    logger.info("\n" + "=" * 60)
     logger.info("Demo 3: Steering Direction Analysis")
-    logger.info("=" * 60)
 
     demo_steering_directions(steering, selected)
 
     # Save analysis
-    logger.info("\n" + "=" * 60)
     logger.info("Saving results...")
-    logger.info("=" * 60)
 
     DEFAULT_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     logger.info(f"Results saved to: {DEFAULT_OUTPUT_DIR}")
 
-    logger.info("\n" + "=" * 60)
-    logger.info("Demo complete!")
-    logger.info("=" * 60)
+    logger.success("Demo complete!")
 
 
 if __name__ == "__main__":
