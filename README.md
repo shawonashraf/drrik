@@ -1,5 +1,7 @@
 # Drrik
 
+[![Tests](https://github.com/rashomon-gh/drrik/actions/workflows/tests.yml/badge.svg)](https://github.com/rashomon-gh/drrik/actions/workflows/tests.yml) [![Documentation](https://github.com/rashomon-gh/drrik/actions/workflows/gh_pages.yml/badge.svg)](https://github.com/rashomon-gh/drrik/actions/workflows/gh_pages.yml)
+
 Drrik (দৃক) is a Sanskrit (সংস্কৃত) word which stands for knowledge, eye, and direction. Drrik is a framework for extracting interpretable features from the MLP layers of transformer-based Large Language Models using Sparse Autoencoders, inspired by the [Towards Monosemanticity](https://transformer-circuits.pub/2023/monosemantic-features/index.html) paper from Anthropic.
 
 ## Installation
