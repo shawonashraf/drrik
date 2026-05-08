@@ -109,7 +109,7 @@ def extract(
         dataset_config=cfg.get("dataset_config"),
         split=cfg.get("split", "train"),
         mlp_layers=cfg["mlp_layers"],
-        max_samples=cfg["num_samples"],
+        num_samples=cfg["num_samples"],
         batch_size=cfg.get("extraction_batch_size", 8),
     )
 
@@ -457,7 +457,7 @@ def run(config: Path, wandb: Optional[bool]):
         dataset_config=cfg.get("dataset_config"),
         split=cfg.get("split", "train"),
         mlp_layers=cfg["mlp_layers"],
-        max_samples=cfg["num_samples"],
+        num_samples=cfg["num_samples"],
         batch_size=cfg.get("extraction_batch_size", 8),
     )
 
@@ -595,7 +595,7 @@ model_name: "google/gemma-2b"  # HuggingFace model name (<3B for 8GB VRAM)
 # dataset_name: "wikitext"         # HuggingFace dataset name
 # dataset_config: "wikitext-2-raw-v1"  # Dataset configuration name
 # split: "train"                    # Dataset split: train, validation, test
-# max_samples: 1000                # Number of samples to process
+# num_samples: 1000                # Number of samples to process
 # max_length: 512                  # Maximum sequence length
 # text_column: "text"               # Name of text column in dataset
 # extraction_batch_size: 8              # Batch size for inference
