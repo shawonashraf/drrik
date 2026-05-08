@@ -239,7 +239,7 @@ For API keys and optional settings, create a `.env` file (see `.env.example`):
 
 ```bash
 # HuggingFace Hub token (for gated models)
-HF_TOKEN=your_token_here
+HUGGINGFACE_HUB_TOKEN=your_token_here
 
 # Weights & Biases API key (optional, for experiment tracking)
 WANDB_API_KEY=your_wandb_key_here
