@@ -8,7 +8,7 @@ activation extraction and sparse autoencoder training.
 from typing import List, Optional, Union
 from pathlib import Path
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from pydantic_settings import BaseSettings
 
 
@@ -213,9 +213,10 @@ class Config(BaseSettings):
         description="Logging level (DEBUG, INFO, WARNING, ERROR)"
     )
 
-    class Config:
-        env_prefix = "DRIK_"
-        env_nested_delimiter = "__"
+    model_config = ConfigDict(
+        env_prefix="DRIK_",
+        env_nested_delimiter="__",
+    )
 
     def create_output_dirs(self) -> None:
         """Create output directories if they don't exist."""
