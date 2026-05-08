@@ -359,7 +359,7 @@ class SAESteering:
 
             # Generate token by token using the underlying transformers model
             # nnsight's LanguageModel wraps a transformers model
-            base_model = self.model.model
+            base_model = self.model._module
             device = generated_tokens.device
 
             for step in tqdm(range(max_new_tokens), desc="Steering generation"):
@@ -403,10 +403,8 @@ class SAESteering:
                 if next_token.item() == self.tokenizer.eos_token_id:
                     break
 
-                # Append token
-                generated_tokens = torch.cat(
-                    [generated_tokens, next_token.unsqueeze(0)], dim=-1
-                )
+                # Append token (next_token is already (1, 1) from multinomial on 2D logits)
+                generated_tokens = torch.cat([generated_tokens, next_token], dim=-1)
                 if attention_mask is not None:
                     attention_mask = torch.cat(
                         [attention_mask, torch.ones(1, 1, device=device)], dim=-1
@@ -534,7 +532,7 @@ class SAESteering:
         if attention_mask is not None:
             attention_mask = attention_mask.to(self.model.device)
 
-        base_model = self.model.model
+        base_model = self.model._module
         generated_tokens = input_ids.clone()
 
         with torch.no_grad():
@@ -570,9 +568,7 @@ class SAESteering:
                 if next_token.item() == self.tokenizer.eos_token_id:
                     break
 
-                generated_tokens = torch.cat(
-                    [generated_tokens, next_token.unsqueeze(0)], dim=-1
-                )
+                generated_tokens = torch.cat([generated_tokens, next_token], dim=-1)
                 if attention_mask is not None:
                     attention_mask = torch.cat(
                         [
@@ -735,7 +731,7 @@ class SAESteering:
                 f"feature_idx {feature_idx} out of range [0, {self.sae.hidden_dim})"
             )
 
-        direction = self.sae.decoder.weight[:, feature_idx].cpu().numpy()
+        direction = self.sae.decoder.weight[:, feature_idx].detach().cpu().numpy()
 
         if normalize:
             norm = np.linalg.norm(direction)
