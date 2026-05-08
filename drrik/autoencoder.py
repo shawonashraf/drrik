@@ -255,7 +255,7 @@ class SparseAutoencoder(nn.Module):
 
                 # Set encoder weight (smaller scale to prevent immediate firing)
                 avg_encoder_norm = (
-                    self.encoder.weight[:, ~dead_mask].norm(dim=0).mean().item()
+                    self.encoder.weight[~dead_mask].norm(dim=1).mean().item()
                     if (~dead_mask).any() > 0
                     else 0.1
                 )
@@ -329,7 +329,7 @@ class SparseAutoencoder(nn.Module):
         if device is None:
             device = "cuda" if torch.cuda.is_available() else "cpu"
 
-        self = self.to(device)
+        self.to(device)
 
         # Convert to tensor
         if isinstance(activations, np.ndarray):
@@ -355,7 +355,7 @@ class SparseAutoencoder(nn.Module):
         if self.bias is not None and self.pre_encoder_bias:
             with torch.no_grad():
                 # Approximate geometric median using median for simplicity
-                median = train_data.median(dim=0).values
+                median = train_data.to(device).median(dim=0).values
                 self.bias.data = median
 
         # Optimizer

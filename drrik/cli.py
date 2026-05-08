@@ -97,7 +97,7 @@ def extract(
 
     # Create output directory
     if output_dir is None:
-        output_dir = Path("./activations_output")
+        output_dir = Path("./drrik_output/activations")
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -109,7 +109,7 @@ def extract(
         split=cfg.get("split", "train"),
         mlp_layers=cfg["mlp_layers"],
         num_samples=cfg["num_samples"],
-        batch_size=cfg.get("batch_size", 8),
+        batch_size=cfg.get("extraction_batch_size", 8),
     )
 
     # Extract activations
@@ -206,14 +206,13 @@ def train(
     # Load activations
     if activations is None:
         activations = Path(
-            cfg.get("activations_path", "./activations_output/activations.pkl")
+            cfg.get("activations_path", "./drrik_output/activations/activations.pkl")
         )
 
     from drrik.models import ActivationExtractor
 
-    extractor = ActivationExtractor()  # Config doesn't matter for loading
-    activations_data, metadata = extractor.load_activations(activations)
-    activations = activations_data["activations"]
+    extractor = ActivationExtractor()
+    activations, metadata = extractor.load_activations(activations)
 
     # Setup wandb
     wandb_config = None
@@ -243,7 +242,7 @@ def train(
     logger.info("Starting training...")
     sae.fit(
         activations,
-        batch_size=cfg.get("batch_size", 256),
+        batch_size=cfg.get("training_batch_size", 256),
         num_epochs=cfg["num_epochs"],
         learning_rate=cfg.get("learning_rate", 1e-4),
         validation_split=cfg.get("validation_split", 0.1),
@@ -257,7 +256,7 @@ def train(
 
     # Save model
     if output_dir is None:
-        output_dir = Path("./sae_output")
+        output_dir = Path("./drrik_output/models")
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -341,15 +340,14 @@ def visualize(
 
     if activations is None:
         activations = Path(
-            cfg.get("activations_path", "./activations_output/activations.pkl")
+            cfg.get("activations_path", "./drrik_output/activations/activations.pkl")
         )
 
     extractor = ActivationExtractor()
-    activations_data, metadata = extractor.load_activations(activations)
-    activations = activations_data["activations"]
+    activations, metadata = extractor.load_activations(activations)
 
     if model is None:
-        model = Path(cfg.get("sae_model_path", "./sae_output/sae_model.pt"))
+        model = Path(cfg.get("sae_model_path", "./drrik_output/models/sae_model.pt"))
 
     sae = SparseAutoencoder.load(model)
 
@@ -412,66 +410,39 @@ def run(config: Optional[Path]):
 
     # Get shared settings
     output_dir = Path(cfg.get("output_dir", "./drrik_output"))
-    device = cfg.get("device", None)
+    extraction_device = cfg.get("extraction_device", None)
+    training_device = cfg.get("training_device", None)
     wandb_enabled = cfg.get("wandb_enabled", True)
 
     # Run extract
-    ctx = cli.make_context(
-        "extract",
-        [
-            "--config",
-            str(config),
-            "--output-dir",
-            str(output_dir / "activations"),
-            "--device",
-            device or "auto",
-        ],
+    logger.info("Step 1/3: Extracting activations...")
+    extract.callback(
+        config=config,
+        output_dir=output_dir / "activations",
+        device=extraction_device,
+        wandb=wandb_enabled,
     )
-    with ctx:
-        extract(config, output_dir / "activations", device, wandb_enabled)
 
     # Run train
-    ctx = cli.make_context(
-        "train",
-        [
-            "--config",
-            str(config),
-            "--activations",
-            str(output_dir / "activations" / "activations.pkl"),
-            "--output-dir",
-            str(output_dir / "models"),
-            "--device",
-            device or "auto",
-        ],
+    logger.info("Step 2/3: Training sparse autoencoder...")
+    train.callback(
+        config=config,
+        activations=output_dir / "activations" / "activations.pkl",
+        output_dir=output_dir / "models",
+        device=training_device,
+        wandb=wandb_enabled,
     )
-    with ctx:
-        train(config, None, output_dir / "models", device, wandb_enabled)
 
     # Run visualize
-    ctx = cli.make_context(
-        "visualize",
-        [
-            "--config",
-            str(config),
-            "--activations",
-            str(output_dir / "activations" / "activations.pkl"),
-            "--model",
-            str(output_dir / "models" / "sae_model.pt"),
-            "--output-dir",
-            str(output_dir / "visualizations"),
-            "--n-features",
-            cfg.get("n_features_to_visualize", 10),
-        ],
+    logger.info("Step 3/3: Generating visualizations...")
+    visualize.callback(
+        config=config,
+        activations=output_dir / "activations" / "activations.pkl",
+        model=output_dir / "models" / "sae_model.pt",
+        output_dir=output_dir / "visualizations",
+        n_features=cfg.get("n_features_to_visualize", 10),
+        wandb=wandb_enabled,
     )
-    with ctx:
-        visualize(
-            config,
-            None,
-            None,
-            output_dir / "visualizations",
-            cfg.get("n_features_to_visualize", 10),
-            wandb_enabled,
-        )
 
     logger.info("=" * 60)
     logger.info("Pipeline complete!")
@@ -515,7 +486,7 @@ model_name: "google/gemma-2b"  # HuggingFace model name (<3B for 8GB VRAM)
 # max_samples: 1000                # Number of samples to process
 # max_length: 512                  # Maximum sequence length
 # text_column: "text"               # Name of text column in dataset
-# batch_size: 8                     # Batch size for inference
+# extraction_batch_size: 8              # Batch size for inference
 
 # ============================================================================
 # Activation Extraction Configuration
@@ -531,7 +502,7 @@ model_name: "google/gemma-2b"  # HuggingFace model name (<3B for 8GB VRAM)
 # l1_coefficient: 0.01              # L1 regularization strength for sparsity
 # learning_rate: 0.0001             # Learning rate for Adam optimizer
 # num_epochs: 50                    # Number of training epochs
-# batch_size: 256                   # Training batch size
+# training_batch_size: 256              # Training batch size
 # validation_split: 0.1              # Fraction of data for validation
 # resample_dead_neurons: true        # Whether to resample dead neurons during training
 # resample_interval: 10000          # Steps between resampling checks
@@ -555,7 +526,8 @@ model_name: "google/gemma-2b"  # HuggingFace model name (<3B for 8GB VRAM)
 # ============================================================================
 # Hardware Configuration
 # ============================================================================
-# device: "auto"                     # Device for training: auto, cuda, cpu
+# extraction_device: "cpu"            # Device for activation extraction: auto, cuda, cpu, mps
+# training_device: "mps"              # Device for SAE training: auto, cuda, cpu, mps
 
 # ============================================================================
 # Output Configuration

@@ -4,20 +4,19 @@ Agent documentation for the Drrik framework.
 
 ## Agent Guidelines
 
-**Verification Required**: Agents must only write code that can be verified through:
+**Codebase First**: Always analyze the existing codebase (imports, patterns, nearby code) before considering external sources. Most answers can be inferred from how the project already does things.
+
+**External Verification (fallback)**: Only when the codebase doesn't provide enough context, verify assumptions through:
 
 - Official documentation (linked references)
 - Web search results (with sources cited)
-- Existing codebase patterns
 
 **Key Documentation Sources**:
 
 - [PyTorch 2.11](https://docs.pytorch.org/docs/2.11/index.html)
 - [nnsight](https://nnsight.net/documentation/)
 
-**No Speculative Code**: Do not write code based on internal reasoning alone. Every technical decision must be grounded in verifiable sources.
-
-**When in doubt**: Search first, code second. If documentation cannot be found, ask the user rather than guessing.
+**No Speculative Code**: Do not write code based on internal reasoning alone. If the codebase is unclear and documentation cannot be found, ask the user rather than guessing.
 
 ## Project Overview
 
