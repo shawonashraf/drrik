@@ -267,6 +267,8 @@ def main():
         "Python is a programming language that",
     ]
 
+    all_results = {}
+
     for prompt in prompts:
         logger.info(f"Prompt: '{prompt}'")
         for feat in selected:
@@ -277,6 +279,7 @@ def main():
             logger.info(f"Feature :: {feature_idx}")
             for label, text in results.items():
                 logger.info(f"{label}: {text}")
+                all_results[f"{prompt[:30]}_feat{feature_idx}_{label}"] = text
 
     logger.info("Demo 2: Multi-Feature Steering")
 
@@ -288,6 +291,7 @@ def main():
             steering, prompt, selected, max_new_tokens=MAX_NEW_TOKENS
         )
         logger.info(f"Combined result: {result}")
+        all_results["multi_feature_combined"] = result
 
     logger.info("Demo 3: Steering Direction Analysis")
 
@@ -296,6 +300,21 @@ def main():
     logger.info("Saving results...")
 
     DEFAULT_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    for feat in selected:
+        feature_idx = feat["feature_idx"]
+        prompt_results = {
+            k: v
+            for k, v in all_results.items()
+            if f"_feat{feature_idx}_" in k or k == "multi_feature_combined"
+        }
+        if prompt_results:
+            steering.save_steering_analysis(
+                prompt_results,
+                DEFAULT_OUTPUT_DIR,
+                prompt="; ".join(prompts),
+                feature_label=f"feature_{feature_idx}",
+            )
+
     logger.info(f"Results saved to: {DEFAULT_OUTPUT_DIR}")
 
     logger.success("Demo complete!")
