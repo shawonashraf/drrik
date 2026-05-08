@@ -22,12 +22,8 @@ def main():
     # Set random seed for reproducibility
     torch.manual_seed(42)
 
-    logger.info("=" * 60)
-    logger.info("Drrik Framework - Basic Usage Example")
-    logger.info("=" * 60)
-
     # ========== Step 1: Extract MLP Activations ==========
-    logger.info("\n[Step 1] Extracting MLP activations...")
+    logger.info("[Step 1] Extracting MLP activations...")
 
     extractor = ActivationExtractor(
         model_name="google/gemma-2b",  # 2B parameters, fits on 8GB VRAM
@@ -48,7 +44,7 @@ def main():
     # extractor.save_activations(activations, metadata, "activations.pkl")
 
     # ========== Step 2: Train Sparse Autoencoder ==========
-    logger.info("\n[Step 2] Training Sparse Autoencoder...")
+    logger.info("[Step 2] Training Sparse Autoencoder...")
 
     sae = SparseAutoencoder(
         activation_dim=activations.shape[-1],
@@ -81,7 +77,7 @@ def main():
     sae.save("sae_model.pt")
 
     # ========== Step 3: Visualize Learned Features ==========
-    logger.info("\n[Step 3] Creating visualizations...")
+    logger.info("[Step 3] Creating visualizations...")
 
     visualizer = FeatureVisualizer(
         sae=sae,
@@ -94,7 +90,7 @@ def main():
     visualizer.save_all(n_features=10)
 
     # ========== Step 4: Analyze Specific Features ==========
-    logger.info("\n[Step 4] Analyzing top features...")
+    logger.info("[Step 4] Analyzing top features...")
 
     # Get feature densities
     densities = visualizer.sae.get_feature_density(activations)
@@ -107,25 +103,25 @@ def main():
     logger.info(
         f"Active features: {n_active}/{len(densities)} ({n_active / len(densities) * 100:.1f}%)"
     )
-    logger.info(f"Median density: {densities[densities > 0].median():.2e}")
+    logger.info(f"Median density: {densities[densities > 0].median():.2e}")  # type: ignore
 
     # Show top activating examples for a specific feature
     top_feature_idx = densities.argmax()
-    logger.info(f"\nTop feature by density: {top_feature_idx}")
+    logger.info(f"Top feature by density: {top_feature_idx}")
 
     top_values, top_indices = sae.get_top_activating_examples(
-        activations, top_feature_idx, k=5
+        activations,
+        top_feature_idx,
+        k=5,  # type: ignore
     )
 
     logger.info("Top 5 activating examples:")
     for i, (val, idx) in enumerate(zip(top_values, top_indices)):
         if idx < len(metadata["samples_metadata"]):
             text = metadata["samples_metadata"][idx]["text"][:100]
-            logger.info(f'  {i + 1}. activation={val:.4f}: "{text}..."')
+            logger.info(f'{i + 1}. activation={val:.4f}: "{text}..."')
 
-    logger.info("\n" + "=" * 60)
-    logger.info("Done! Check the ./visualizations directory for plots.")
-    logger.info("=" * 60)
+    logger.success("Done! Check the ./visualizations directory for plots.")
 
 
 if __name__ == "__main__":

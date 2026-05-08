@@ -16,10 +16,6 @@ from drrik import ActivationExtractor, SparseAutoencoder, FeatureVisualizer
 def main():
     """Load saved activations and train an SAE."""
 
-    logger.info("=" * 60)
-    logger.info("Loading Saved Activations Example")
-    logger.info("=" * 60)
-
     # ========== Load Saved Activations ==========
     activations_path = "activations.pkl"  # Change to your path
 
@@ -38,7 +34,7 @@ def main():
         return
 
     # ========== Train SAE on Loaded Data ==========
-    logger.info("\nTraining SAE on loaded activations...")
+    logger.info("Training SAE on loaded activations...")
 
     sae = SparseAutoencoder(
         activation_dim=activations.shape[-1],
@@ -60,7 +56,7 @@ def main():
     logger.info("Saved trained SAE")
 
     # ========== Analyze Features ==========
-    logger.info("\nAnalyzing learned features...")
+    logger.info("Analyzing learned features...")
 
     visualizer = FeatureVisualizer(
         sae=sae,
@@ -74,29 +70,31 @@ def main():
     # Show some statistics
     densities = sae.get_feature_density(activations)
 
-    logger.info("\nFeature Statistics:")
-    logger.info(f"  Total features: {len(densities)}")
-    logger.info(f"  Dead features: {(densities == 0).sum()}")
-    logger.info(f"  Active features: {(densities > 0).sum()}")
-    logger.info(f"  Median density (active): {densities[densities > 0].median():.2e}")
+    logger.info("Feature Statistics:")
+    logger.info(f"Total features: {len(densities)}")
+    logger.info(f"Dead features: {(densities == 0).sum()}")
+    logger.info(f"Active features: {(densities > 0).sum()}")
+    logger.info(f"Median density (active): {densities[densities > 0].median():.2e}")  # type: ignore
 
     # Show top activating example for most active feature
     top_feature = densities.argmax()
     top_values, top_indices = sae.get_top_activating_examples(
-        activations, top_feature, k=3
+        activations,
+        top_feature,
+        k=3,  # type: ignore
     )
 
-    logger.info(f"\nMost active feature: {top_feature}")
-    logger.info(f"  Density: {densities[top_feature]:.2e}")
+    logger.info(f"Most active feature: {top_feature}")
+    logger.info(f"Density: {densities[top_feature]:.2e}")
 
     if "samples_metadata" in metadata:
-        logger.info("\nTop activating examples:")
+        logger.info("Top activating examples:")
         for i, (val, idx) in enumerate(zip(top_values, top_indices)):
             if idx < len(metadata["samples_metadata"]):
                 text = metadata["samples_metadata"][idx]["text"][:150]
-                logger.info(f'  {i + 1}. ({val:.4f}): "{text}..."')
+                logger.info(f'{i + 1}. ({val:.4f}): "{text}..."')
 
-    logger.info("\nDone! Check ./visualizations_from_saved/ for plots.")
+    logger.success("Done! Check ./visualizations_from_saved/ for plots.")
 
 
 if __name__ == "__main__":

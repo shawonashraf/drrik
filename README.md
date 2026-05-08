@@ -90,6 +90,42 @@ drrik train --config config.yml --activations ./outputs/activations.pkl
 drrik visualize --config config.yml --n-features 20 --no-wandb
 ```
 
+### Activation Steering
+
+After training an SAE, use the learned feature directions to steer model generation:
+
+```python
+from drrik import SAESteering, SparseAutoencoder
+
+sae = SparseAutoencoder.load("sae_model.pt")
+steering = SAESteering(sae, model_name="google/gemma-2b", layer=0)
+
+# Generate with a single feature
+result = steering.generate(
+    "The weather is",
+    feature_idx=42,
+    strength=3.0,
+    max_new_tokens=50,
+)
+
+# Compare baseline vs steered at multiple strengths
+comparison = steering.compare_steering(
+    "The weather is",
+    feature_idx=42,
+    strengths=[0.0, 1.0, 2.0, 5.0],
+)
+
+# Combine multiple features
+result = steering.generate(
+    "The weather is",
+    feature_indices=[10, 42],
+    strengths=[1.0, 2.0],
+)
+
+# Baseline (no steering)
+baseline = steering.generate("The weather is", max_new_tokens=50)
+```
+
 ### Example Scripts
 
 ```bash
@@ -104,6 +140,9 @@ python examples/load_saved_activations.py
 
 # Using wandb integration
 python examples/with_wandb.py
+
+# SAE-based activation steering
+python examples/sae_steering.py
 ```
 
 ## Configuration
@@ -232,6 +271,14 @@ Following the Anthropic paper:
 - **Pre-encoder bias**: As used in the paper
 - **Dead neuron resampling**: Reinitializes inactive neurons during training using a sliding window of recent batches for robust detection
 
+### Activation Steering
+
+Use trained SAE features to steer language model generation by adding scaled decoder weight vectors to MLP activations during inference:
+- **Single-feature steering**: Bias output toward one learned feature direction
+- **Multi-feature steering**: Combine multiple feature directions with individual strengths
+- **Comparison tools**: Compare baseline vs steered outputs across strength levels
+- **Feature analysis**: Find top-activating features for a given input
+
 ### Wandb Integration
 
 Optional wandb integration for experiment tracking:
@@ -345,6 +392,33 @@ visualizer.plot_feature_density()
 visualizer.plot_top_features(n_features=10)
 visualizer.create_feature_dashboard(feature_idx=0)
 visualizer.save_all(n_features=10)
+```
+
+### SAESteering
+
+```python
+from drrik import SAESteering, SparseAutoencoder
+
+sae = SparseAutoencoder.load("sae_model.pt")
+steering = SAESteering(
+    sae=sae,
+    model_name="google/gemma-2b",
+    layer=0,               # target MLP layer
+    device_map="auto",
+    # token is read from HUGGINGFACE_HUB_TOKEN in .env by default
+)
+
+# Steered generation
+output = steering.generate("The sky is", feature_idx=42, strength=2.0)
+
+# Find top features for an input
+features = steering.find_steering_features("text", activations, top_k=20)
+
+# Get raw steering direction vector
+direction = steering.get_steering_direction(42, normalize=True)
+
+# Save comparison results
+steering.save_steering_analysis(results, "./output", prompt="The sky is")
 ```
 
 ## Testing

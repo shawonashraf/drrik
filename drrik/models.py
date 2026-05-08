@@ -1,3 +1,5 @@
+# type: ignore
+
 """
 Model and activation extraction module using nnsight.
 
@@ -5,12 +7,14 @@ This module provides the ``ActivationExtractor`` class which orchestrates
 the full activation extraction pipeline:
 
 1. **Model Loading**: Loads a HuggingFace language model via nnsight's
-   ``LanguageModel`` wrapper, supporting gated models with authentication.
+   ``LanguageModel`` wrapper, supporting gated models with authentication
+   via ``HUGGINGFACE_HUB_TOKEN`` (loaded through :func:`drrik.settings.get_settings`).
 2. **Dataset Loading**: Loads and tokenizes a HuggingFace dataset for
    inference.
 3. **Activation Extraction**: Runs forward passes through the model,
    capturing MLP layer outputs at specified layers using nnsight's
-   tracing context.
+   tracing context. Module paths are resolved with the shared
+   :func:`~drrik.steering.resolve_module_path` utility.
 4. **Persistence**: Saves and loads extracted activations as ``.npy``
    files with accompanying ``.pkl`` metadata.
 
@@ -24,7 +28,7 @@ from typing import Optional, Tuple, Union, Dict, Any
 from pathlib import Path
 import pickle
 
-import re
+from drrik.steering import resolve_module_path
 
 import torch
 import numpy as np
@@ -43,21 +47,34 @@ class ActivationExtractor:
     """
     Extract MLP activations from language models using nnsight.
 
-    This class handles:
-    - Loading models from HuggingFace Hub
-    - Loading datasets from HuggingFace Hub
-    - Running inference and collecting MLP layer activations
-    - Saving/loading extracted activations
+    Handles model and dataset loading from HuggingFace Hub, runs
+    inference with nnsight's tracing context to capture MLP outputs,
+    and provides persistence via ``.npy`` / ``.pkl`` files.
+
+    The HuggingFace auth token is read automatically from the
+    ``HUGGINGFACE_HUB_TOKEN`` environment variable (or ``.env`` file)
+    via :func:`~drrik.settings.get_settings`.
+
+    Attributes:
+        config: The resolved :class:`~drrik.config.ActivationExtractorConfig`.
+        model: The loaded nnsight ``LanguageModel`` (``None`` until
+            :meth:`load_model` is called).
+        tokenizer: The HuggingFace tokenizer (``None`` until
+            :meth:`load_model` is called).
+        dataset: The loaded HuggingFace ``Dataset`` (``None`` until
+            :meth:`load_dataset` is called).
 
     Example:
         ```python
         extractor = ActivationExtractor(
             model_name="google/gemma-2b",
             dataset_name="wikitext",
+            dataset_config="wikitext-2-raw-v1",
             mlp_layers=[0],
-            num_samples=1000
+            num_samples=1000,
         )
         activations, metadata = extractor.extract()
+        extractor.save_activations(activations, metadata, "./output")
         ```
     """
 
@@ -65,9 +82,27 @@ class ActivationExtractor:
         """
         Initialize the ActivationExtractor.
 
+        Accepts either a pre-built config object or flat keyword
+        arguments that are automatically sorted into
+        :class:`~drrik.config.ModelConfig`,
+        :class:`~drrik.config.DatasetConfig`, and the remaining
+        extraction-level settings.
+
         Args:
-            config: Configuration object. If None, builds from kwargs.
-            **kwargs: Config overrides (e.g., model_name="gpt2", num_samples=1000)
+            config: A fully constructed
+                :class:`~drrik.config.ActivationExtractorConfig`.
+                If ``None``, the config is built from ``**kwargs``.
+            **kwargs: Flat config overrides. Recognised keys are
+                distributed to the appropriate sub-config:
+
+                - *Model*: ``model_name``, ``revision``,
+                  ``torch_dtype``, ``device_map``,
+                  ``trust_remote_code``
+                - *Dataset*: ``dataset_name``, ``dataset_config``,
+                  ``split``, ``num_samples``, ``text_column``,
+                  ``max_length``
+                - *Extraction*: ``mlp_layers``, ``batch_size``,
+                  ``output_dir``
         """
         if config is None:
             model_kwargs = {
@@ -121,11 +156,15 @@ class ActivationExtractor:
         """
         Load the model from HuggingFace Hub using nnsight.
 
+        If the model is already loaded, returns the cached instance.
+        The HuggingFace token is read from ``HUGGINGFACE_HUB_TOKEN``
+        via :func:`~drrik.settings.get_settings`.
+
         Returns:
-            The loaded nnsight model wrapper
+            The loaded nnsight :class:`~nnsight.LanguageModel` wrapper.
 
         Raises:
-            RuntimeError: If model loading fails
+            RuntimeError: If model loading fails.
         """
         if self.model is not None:
             return self.model
@@ -186,11 +225,15 @@ class ActivationExtractor:
         """
         Load the dataset from HuggingFace Hub.
 
+        If the dataset is already loaded, returns the cached instance.
+        The HuggingFace token is forwarded for gated datasets when
+        available.
+
         Returns:
-            The loaded dataset
+            The loaded HuggingFace :class:`~datasets.Dataset`.
 
         Raises:
-            RuntimeError: If dataset loading fails
+            RuntimeError: If dataset loading fails.
         """
         if self.dataset is not None:
             return self.dataset
@@ -225,16 +268,18 @@ class ActivationExtractor:
 
     def _get_mlp_layer_name(self, layer_idx: int) -> str:
         """
-        Get the nnsight path to an MLP layer.
+        Get the nnsight module path to an MLP layer.
 
-        Different model architectures have different naming conventions.
-        This method attempts to find the correct path for common architectures.
+        Auto-detects the correct path pattern based on the model name
+        in the config.  For unknown architectures a warning is logged
+        and the default Gemma/Llama pattern is returned.
 
         Args:
-            layer_idx: The layer index
+            layer_idx: Zero-indexed transformer layer number.
 
         Returns:
-            The module path string for nnsight
+            A dotted/bracket module path string, e.g.
+            ``"model.layers[3].mlp"``.
         """
         model_name_lower = self.config.model.model_name.lower()
 
@@ -271,9 +316,8 @@ class ActivationExtractor:
     def _resolve_layer_path(self, path: str):
         """Resolve a dotted/bracket path to the actual nnsight module.
 
-        Parses a path string like ``model.layers[0].mlp`` by splitting
-        on dots, handling both attribute access and integer indexing
-        (bracket notation) to navigate the model's module hierarchy.
+        Delegates to the shared :func:`~drrik.steering.resolve_module_path`
+        utility so that path-resolution logic is maintained in one place.
 
         Args:
             path: A dot-separated module path with optional bracket
@@ -283,14 +327,7 @@ class ActivationExtractor:
             The resolved nnsight module object corresponding to the
             given path.
         """
-        obj = self.model
-        for part in re.split(r"\.", path):
-            match = re.match(r"(\w+)\[(\d+)\]", part)
-            if match:
-                obj = getattr(obj, match.group(1))[int(match.group(2))]
-            else:
-                obj = getattr(obj, part)
-        return obj
+        return resolve_module_path(self.model, path)
 
     def extract(
         self,
@@ -299,20 +336,29 @@ class ActivationExtractor:
         """
         Extract MLP activations from the model.
 
-        This method:
-        1. Loads the model and dataset
-        2. Tokenizes the dataset
-        3. Runs inference with nnsight to collect MLP activations
-        4. Returns the activations and metadata
+        Loads the model and dataset (if not already loaded), tokenizes
+        the data, and runs batched forward passes using nnsight's
+        tracing context.  For each sample, the **last-token** activation
+        from each requested MLP layer is collected and concatenated.
 
         Args:
-            num_samples: Override for the number of samples to process
+            num_samples: Override for the number of samples to process.
+                If ``None``, uses ``config.dataset.num_samples``.
 
         Returns:
-            Tuple of (activations array, metadata dict)
+            A tuple of:
+
+            - **activations** (:class:`numpy.ndarray`) — shape
+              ``(n_samples, activation_dim * n_layers)``.  When a
+              single layer is requested the shape simplifies to
+              ``(n_samples, activation_dim)``.
+            - **metadata** (:class:`dict`) — contains the serialised
+              config, sample count, activation dimension, layer paths,
+              and per-sample metadata (index, truncated text, input
+              ids).
 
         Raises:
-            RuntimeError: If extraction fails
+            RuntimeError: If extraction fails at any stage.
         """
         try:
             # Load model and dataset
@@ -437,15 +483,25 @@ class ActivationExtractor:
         """
         Save extracted activations to disk.
 
-        Saves activations.npy and metadata.pkl to the output directory.
+        Writes two files to *output_dir*:
+
+        - ``activations.npy`` — the activation array.
+        - ``metadata.pkl`` — the metadata dictionary.
 
         Args:
-            activations: The activations array
-            metadata: Metadata dictionary
-            output_dir: Directory to save to. If None, uses config output_dir
+            activations: Activation array of shape
+                ``(n_samples, dim)``.
+            metadata: Metadata dictionary (as returned by
+                :meth:`extract`).
+            output_dir: Target directory.  If ``None``, uses
+                ``config.output_dir``.
 
         Returns:
-            Path where activations were saved
+            Path to the saved ``activations.npy`` file.
+
+        Raises:
+            ValueError: If *output_dir* is ``None`` and no output
+                directory is configured.
         """
         if output_dir is None:
             output_dir = self.config.output_dir
@@ -470,13 +526,22 @@ class ActivationExtractor:
         """
         Load saved activations from disk.
 
-        Supports both .pkl (legacy) and .npy formats.
+        Supports two formats:
+
+        - ``.npy`` — loads the array directly and looks for a
+          companion ``metadata.pkl`` in the same directory.
+        - ``.pkl`` (legacy) — loads a dict with ``"activations"``
+          and ``"metadata"`` keys.
 
         Args:
-            filepath: Path to activations .pkl or .npy file
+            filepath: Path to an ``.npy`` or ``.pkl`` file.
 
         Returns:
-            Tuple of (activations array, metadata dict)
+            A tuple of (activations array, metadata dict).
+
+        Raises:
+            FileNotFoundError: If the file (or companion metadata) does
+                not exist.
         """
         filepath = Path(filepath)
 

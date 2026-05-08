@@ -11,6 +11,7 @@ Key Components:
     - **Dataset loading** and inference pipeline
     - **MLP activation collection** using nnsight
     - **Sparse Autoencoder training** for feature extraction
+    - **SAE-based activation steering** to bias model outputs
     - **Visualization** of feature-specific activation vectors
     - Optional **Weights & Biases** integration for experiment tracking
 
@@ -21,6 +22,9 @@ Public API:
         Overcomplete SAE with L1 regularization and dead neuron resampling.
     ``FeatureVisualizer``
         Generates density histograms, training curves, and feature dashboards.
+    ``SAESteering``
+        Steers language model generation by adding SAE feature directions
+        to MLP activations during inference.
     ``Config``
         Top-level Pydantic settings model aggregating all sub-configurations.
     ``EnvironmentSettings``
@@ -64,6 +68,7 @@ __version__ = "0.1.0"
 from drrik.models import ActivationExtractor
 from drrik.autoencoder import SparseAutoencoder
 from drrik.visualization import FeatureVisualizer
+from drrik.steering import SAESteering
 from drrik.config import Config
 from drrik.settings import EnvironmentSettings, WandbConfig, get_settings
 
@@ -71,6 +76,7 @@ __all__ = [
     "ActivationExtractor",
     "SparseAutoencoder",
     "FeatureVisualizer",
+    "SAESteering",
     "Config",
     "EnvironmentSettings",
     "WandbConfig",

@@ -73,6 +73,7 @@ drrik/
 ├── settings.py          # Environment variables, wandb integration
 ├── models.py            # ActivationExtractor (nnsight-based)
 ├── autoencoder.py       # SparseAutoencoder implementation
+├── steering.py          # SAESteering + shared resolve_module_path utility
 ├── visualization.py     # FeatureVisualizer for plots
 └── cli.py               # Click-based CLI (drrik command)
 docs/
@@ -85,8 +86,9 @@ docs/
 
 ### [models.py](drrik/models.py)
 - **ActivationExtractor**: Loads HuggingFace models/datasets, extracts MLP activations using nnsight
-- Supports gated models via `HF_TOKEN` env var
+- Supports gated models via `HUGGINGFACE_HUB_TOKEN` env var (loaded through `get_settings()`)
 - Auto-detects MLP layer paths for common architectures (Gemma, Llama, Phi, BERT)
+- Uses shared `resolve_module_path()` from `steering.py` for dotted/bracket path resolution
 
 ### [autoencoder.py](drrik/autoencoder.py)
 - **SparseAutoencoder**: Overcomplete basis SAE with L1 regularization
@@ -104,6 +106,13 @@ docs/
 ### [settings.py](drrik/settings.py)
 - `EnvironmentSettings`: Loads HF/WANDB API keys from .env
 - `WandbConfig`: Context manager for wandb experiment tracking
+
+### [steering.py](drrik/steering.py)
+- **SAESteering**: Steers language model generation by adding SAE feature directions to MLP activations during inference
+- **resolve_module_path()**: Shared utility for resolving dotted/bracket module paths (used by both `models.py` and `steering.py`)
+- Uses forward hooks on the target MLP layer for intervention during token-by-token generation
+- HF token defaults to `get_settings().huggingface_hub_token` when not explicitly provided
+- `save_steering_analysis()` generates timestamped filenames to prevent overwrites
 
 ### [cli.py](drrik/cli.py)
 - Commands: `init-config`, `extract`, `train`, `visualize`, `run`
@@ -126,10 +135,13 @@ Add method to [visualization.py:40](drrik/visualization.py#L40) in `FeatureVisua
 ### Adding CLI Commands
 Add Click command to [cli.py:42](drrik/cli.py#L42) using the `@cli.command()` decorator.
 
+### Adding Steering Features
+Edit [steering.py](drrik/steering.py) — the `SAESteering` class uses forward hooks registered on the target MLP module. The `generate()` method is the main entry point; `_generate_with_hooks()` handles the hook-based intervention loop. The shared `resolve_module_path()` at module level resolves dotted paths like `model.layers[0].mlp`.
+
 ## Environment Setup
 
 Required env vars (see [.env.example](.env.example)):
-- `HF_TOKEN` - HuggingFace token for gated models
+- `HUGGINGFACE_HUB_TOKEN` - HuggingFace token for gated models
 - `WANDB_API_KEY` - Optional, for experiment tracking
 
 ## Linting & Formatting
@@ -180,5 +192,5 @@ Dev: pytest (testing), ruff (linting/formatting), pre-commit (git hooks), pdoc (
 ## Entry Points
 
 - **CLI**: `drrik` command → [cli.py:719](drrik/cli.py#L719)
-- **Python API**: `from drrik import ActivationExtractor, SparseAutoencoder, FeatureVisualizer`
+- **Python API**: `from drrik import ActivationExtractor, SparseAutoencoder, FeatureVisualizer, SAESteering`
 - **API Docs**: [docs/drrik.html](docs/drrik.html)
