@@ -213,19 +213,13 @@ WANDB_MODE=online  # or 'offline' to disable
 
 ### Supported Models
 
-Any HuggingFace transformer model with MLP layers. Recommended for 8GB VRAM:
-- `google/gemma-2b` (2B parameters)
-- `microsoft/phi-2` (2.7B parameters)
-- `TinyLlama/TinyLlama-1.1B-Chat-v1.0` (1.1B parameters)
+Any HuggingFace transformer model with MLP layers. 
 
-> **Note for Apple Silicon users**: Models like gemma-2b have internal weight matrices that exceed MPS kernel limits. Use `device_map: "cpu"` for activation extraction and `training_device: "mps"` for SAE training.
+> [!NOTE] **For Apple Silicon users**: Models like gemma-2b have internal weight matrices that exceed MPS kernel limits. Use `device_map: "cpu"` for activation extraction and `training_device: "mps"` for SAE training or, use a smaller batch size and hidden dimension (meaning a smaller expansion factor).
 
 ### Supported Datasets
 
-Any dataset from HuggingFace Datasets. Common choices:
-- `wikitext` - Wikipedia text
-- `pile` - The Pile dataset
-- `c4` - Colossal Clean Crawled Corpus
+Any dataset from HuggingFace Datasets.
 
 ### SAE Features
 
