@@ -31,6 +31,7 @@ Public API:
         Returns the global ``EnvironmentSettings`` singleton.
 
 Example Usage:
+    ```python
     from drrik import ActivationExtractor, SparseAutoencoder, FeatureVisualizer
 
     # Extract activations
@@ -55,6 +56,7 @@ Example Usage:
     visualizer = FeatureVisualizer(sae, activations)
     visualizer.plot_feature_density()
     visualizer.plot_top_activating_examples()
+    ```
 """
 
 __version__ = "0.1.0"

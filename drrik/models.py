@@ -50,6 +50,7 @@ class ActivationExtractor:
     - Saving/loading extracted activations
 
     Example:
+        ```python
         extractor = ActivationExtractor(
             model_name="google/gemma-2b",
             dataset_name="wikitext",
@@ -57,6 +58,7 @@ class ActivationExtractor:
             num_samples=1000
         )
         activations, metadata = extractor.extract()
+        ```
     """
 
     def __init__(self, config: Optional[ActivationExtractorConfig] = None, **kwargs):

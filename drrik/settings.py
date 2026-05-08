@@ -36,10 +36,12 @@ class EnvironmentSettings(BaseSettings):
     Create a .env file in the project root with your credentials.
 
     Example .env file:
+        ```bash
         HUGGINGFACE_HUB_TOKEN=hf_...
         WANDB_API_KEY=...
         WANDB_PROJECT=drrik-experiments
         WANDB_ENTITY=your-username
+        ```
 
     Attributes:
         huggingface_hub_token: HuggingFace Hub API token for gated models
@@ -177,6 +179,7 @@ class WandbConfig:
     It's designed to be used as a context manager for automatic cleanup.
 
     Example:
+        ```python
         from drrik.settings import WandbConfig
 
         # Use as context manager
@@ -191,6 +194,7 @@ class WandbConfig:
         wandb_config.initialize()
         wandb_config.log_metrics({"loss": 0.5})
         wandb_config.finalize()
+        ```
     """
 
     def __init__(
