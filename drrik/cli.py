@@ -109,7 +109,7 @@ def extract(
         split=cfg.get("split", "train"),
         mlp_layers=cfg["mlp_layers"],
         num_samples=cfg["num_samples"],
-        batch_size=cfg.get("batch_size", 8),
+        batch_size=cfg.get("extraction_batch_size", 8),
     )
 
     # Extract activations
@@ -243,7 +243,7 @@ def train(
     logger.info("Starting training...")
     sae.fit(
         activations,
-        batch_size=cfg.get("batch_size", 256),
+        batch_size=cfg.get("training_batch_size", 256),
         num_epochs=cfg["num_epochs"],
         learning_rate=cfg.get("learning_rate", 1e-4),
         validation_split=cfg.get("validation_split", 0.1),
@@ -487,7 +487,7 @@ model_name: "google/gemma-2b"  # HuggingFace model name (<3B for 8GB VRAM)
 # max_samples: 1000                # Number of samples to process
 # max_length: 512                  # Maximum sequence length
 # text_column: "text"               # Name of text column in dataset
-# batch_size: 8                     # Batch size for inference
+# extraction_batch_size: 8              # Batch size for inference
 
 # ============================================================================
 # Activation Extraction Configuration
@@ -503,7 +503,7 @@ model_name: "google/gemma-2b"  # HuggingFace model name (<3B for 8GB VRAM)
 # l1_coefficient: 0.01              # L1 regularization strength for sparsity
 # learning_rate: 0.0001             # Learning rate for Adam optimizer
 # num_epochs: 50                    # Number of training epochs
-# batch_size: 256                   # Training batch size
+# training_batch_size: 256              # Training batch size
 # validation_split: 0.1              # Fraction of data for validation
 # resample_dead_neurons: true        # Whether to resample dead neurons during training
 # resample_interval: 10000          # Steps between resampling checks
