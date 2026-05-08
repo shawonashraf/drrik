@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Optional
 
 import click
+import numpy as np
 import yaml
 from loguru import logger
 
@@ -115,14 +116,13 @@ def extract(
     # Extract activations
     activations, metadata = extractor.extract()
 
-    # Save activations
-    import pickle
-
-    activations_path = output_dir / "activations.pkl"
+    # Save activations as numpy files
+    activations_path = output_dir / "activations.npy"
     metadata_path = output_dir / "metadata.pkl"
 
-    with open(activations_path, "wb") as f:
-        pickle.dump({"activations": activations, "metadata": metadata}, f)
+    np.save(str(activations_path), activations)
+
+    import pickle
 
     with open(metadata_path, "wb") as f:
         pickle.dump(metadata, f)
@@ -275,8 +275,9 @@ def train(
             f"sae-model-{wandb_config.get_run_id()}",
             artifact_type="model",
         )
+        activations_dir = Path(activations).parent
         wandb_config.log_artifact(
-            str(activations),
+            str(activations_dir),
             f"activations-{wandb_config.get_run_id()}",
             artifact_type="activations",
         )
@@ -403,7 +404,12 @@ def visualize(
     type=click.Path(exists=True),
     required=False,
 )
-def run(config: Optional[Path]):
+@click.option(
+    "--wandb/--no-wandb",
+    default=None,
+    help="Enable/disable wandb logging (overrides config)",
+)
+def run(config: Optional[Path], wandb: Optional[bool]):
     """
     Run the full pipeline: extract -> train -> visualize.
 
@@ -425,7 +431,10 @@ def run(config: Optional[Path]):
     output_dir = Path(cfg.get("output_dir", "./drrik_output"))
     extraction_device = cfg.get("extraction_device", None)
     training_device = cfg.get("training_device", None)
-    wandb_enabled = cfg.get("wandb_enabled", True)
+
+    # CLI flag overrides config file
+    if wandb is None:
+        wandb = cfg.get("wandb_enabled", True)
 
     # Run extract
     logger.info("Step 1/3: Extracting activations...")
@@ -433,7 +442,7 @@ def run(config: Optional[Path]):
         config=config,
         output_dir=output_dir / "activations",
         device=extraction_device,
-        wandb=wandb_enabled,
+        wandb=wandb,
     )
 
     # Run train
@@ -443,7 +452,7 @@ def run(config: Optional[Path]):
         activations=output_dir / "activations" / "activations.pkl",
         output_dir=output_dir / "models",
         device=training_device,
-        wandb=wandb_enabled,
+        wandb=wandb,
     )
 
     # Run visualize
@@ -454,7 +463,7 @@ def run(config: Optional[Path]):
         model=output_dir / "models" / "sae_model.pt",
         output_dir=output_dir / "visualizations",
         n_features=cfg.get("n_features_to_visualize", 10),
-        wandb=wandb_enabled,
+        wandb=wandb,
     )
 
     logger.info("=" * 60)
