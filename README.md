@@ -170,7 +170,7 @@ config = ActivationExtractorConfig(
     ),
     dataset=DatasetConfig(
         dataset_name="wikitext",
-        max_samples=1000,
+        num_samples=1000,
         max_length=512,
     ),
     mlp_layers=[0, 1, 2],
