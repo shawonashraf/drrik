@@ -11,12 +11,14 @@ from typing import Optional, Tuple, Union, Dict, Any
 from pathlib import Path
 import pickle
 
+import re
+
 import torch
 import numpy as np
 from tqdm import tqdm
 from transformers import AutoTokenizer
 from datasets import load_dataset, Dataset
-from nnsight import NNsight
+from nnsight import LanguageModel
 
 from loguru import logger
 
@@ -66,7 +68,7 @@ class ActivationExtractor:
         self._activations = []
         self._metadata = []
 
-    def load_model(self) -> NNsight:
+    def load_model(self) -> LanguageModel:
         """
         Load the model from HuggingFace Hub using nnsight.
 
@@ -122,7 +124,7 @@ class ActivationExtractor:
             if hf_token:
                 nnsight_kwargs["token"] = hf_token
 
-            self.model = NNsight(self.config.model.model_name, **nnsight_kwargs)
+            self.model = LanguageModel(self.config.model.model_name, **nnsight_kwargs)
 
             logger.info(f"Model loaded successfully on {self.model.device}")
             return self.model
@@ -217,6 +219,17 @@ class ActivationExtractor:
         )
         return common_patterns[0]
 
+    def _resolve_layer_path(self, path: str):
+        """Resolve a dotted/bracket path like 'model.layers[0].mlp' to the actual nnsight module."""
+        obj = self.model
+        for part in re.split(r'\.', path):
+            match = re.match(r'(\w+)\[(\d+)\]', part)
+            if match:
+                obj = getattr(obj, match.group(1))[int(match.group(2))]
+            else:
+                obj = getattr(obj, part)
+        return obj
+
     def extract(
         self,
         num_samples: Optional[int] = None,
@@ -291,21 +304,19 @@ class ActivationExtractor:
                     end_idx = min(start_idx + batch_size, len(tokenized))
 
                     batch = tokenized[start_idx:end_idx]
-                    input_ids = torch.stack(batch["input_ids"])
-                    attention_mask = torch.stack(batch["attention_mask"])
+                    input_ids = torch.tensor(batch["input_ids"])
+                    attention_mask = torch.tensor(batch["attention_mask"])
+
+                    layer_outputs = []
 
                     # Use nnsight to extract activations
                     with self.model.trace(
                         input_ids, attention_mask=attention_mask
-                    ) as tracer:
-                        # Collect outputs from each MLP layer
-                        layer_outputs = []
+                    ):
                         for layer_path in layer_paths:
-                            output = tracer[layer_path].output.save()
+                            module = self._resolve_layer_path(layer_path)
+                            output = module.output.save()
                             layer_outputs.append(output)
-
-                        # Run the model
-                        tracer.invoke(input_ids, attention_mask=attention_mask)
 
                     # Process outputs
                     batch_input_ids = input_ids.cpu().numpy()
@@ -314,7 +325,7 @@ class ActivationExtractor:
                         for layer_output in layer_outputs:
                             # Get activation after non-linearity (if applicable)
                             # Shape: (seq_len, hidden_dim) or (batch, seq_len, hidden_dim)
-                            act = layer_output.value
+                            act = layer_output
 
                             if act.dim() == 3:
                                 act = act[sample_idx]  # (seq_len, hidden_dim)
