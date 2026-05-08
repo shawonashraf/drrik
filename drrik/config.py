@@ -67,7 +67,6 @@ class DatasetConfig(BaseModel):
         description="Dataset split to use (train, validation, test)"
     )
     max_samples: int = Field(
-        default=1000,
         ge=1,
         description="Maximum number of samples to process"
     )

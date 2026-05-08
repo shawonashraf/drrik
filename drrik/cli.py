@@ -109,7 +109,7 @@ def extract(
         dataset_config=cfg.get("dataset_config"),
         split=cfg.get("split", "train"),
         mlp_layers=cfg["mlp_layers"],
-        num_samples=cfg["num_samples"],
+        max_samples=cfg["num_samples"],
         batch_size=cfg.get("extraction_batch_size", 8),
     )
 
@@ -457,7 +457,7 @@ def run(config: Path, wandb: Optional[bool]):
         dataset_config=cfg.get("dataset_config"),
         split=cfg.get("split", "train"),
         mlp_layers=cfg["mlp_layers"],
-        num_samples=cfg["num_samples"],
+        max_samples=cfg["num_samples"],
         batch_size=cfg.get("extraction_batch_size", 8),
     )
 
