@@ -97,7 +97,7 @@ def extract(
 
     # Create output directory
     if output_dir is None:
-        output_dir = Path("./activations_output")
+        output_dir = Path("./drrik_output/activations")
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -206,7 +206,7 @@ def train(
     # Load activations
     if activations is None:
         activations = Path(
-            cfg.get("activations_path", "./activations_output/activations.pkl")
+            cfg.get("activations_path", "./drrik_output/activations/activations.pkl")
         )
 
     from drrik.models import ActivationExtractor
@@ -256,7 +256,7 @@ def train(
 
     # Save model
     if output_dir is None:
-        output_dir = Path("./sae_output")
+        output_dir = Path("./drrik_output/models")
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -340,15 +340,14 @@ def visualize(
 
     if activations is None:
         activations = Path(
-            cfg.get("activations_path", "./activations_output/activations.pkl")
+            cfg.get("activations_path", "./drrik_output/activations/activations.pkl")
         )
 
     extractor = ActivationExtractor()
-    activations_data, metadata = extractor.load_activations(activations)
-    activations = activations_data["activations"]
+    activations, metadata = extractor.load_activations(activations)
 
     if model is None:
-        model = Path(cfg.get("sae_model_path", "./sae_output/sae_model.pt"))
+        model = Path(cfg.get("sae_model_path", "./drrik_output/models/sae_model.pt"))
 
     sae = SparseAutoencoder.load(model)
 
