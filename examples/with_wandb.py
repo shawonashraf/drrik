@@ -31,16 +31,12 @@ def main():
     # Load environment settings
     settings = get_settings()
 
-    logger.info("=" * 60)
-    logger.info("Drrik Framework - With wandb Integration")
-    logger.info("=" * 60)
-
     # Check settings
-    logger.info("\nEnvironment Settings:")
-    logger.info(f"  HF Token configured: {settings.has_hf_token}")
-    logger.info(f"  wandb enabled: {settings.use_wandb}")
-    logger.info(f"  wandb project: {settings.wandb_project}")
-    logger.info(f"  wandb mode: {settings.wandb_mode}")
+    logger.info("Environment Settings:")
+    logger.info(f"HF Token configured: {settings.has_hf_token}")
+    logger.info(f"wandb enabled: {settings.use_wandb}")
+    logger.info(f"wandb project: {settings.wandb_project}")
+    logger.info(f"wandb mode: {settings.wandb_mode}")
 
     # ========== Step 1: Create wandb config ==========
     wandb_config = WandbConfig(
@@ -60,8 +56,6 @@ def main():
     )
 
     # ========== Step 2: Extract MLP Activations ==========
-    logger.info("\n[Step 1] Extracting MLP activations...")
-
     extractor = ActivationExtractor(
         model_name="google/gemma-2b",
         dataset_name="wikitext",
@@ -77,8 +71,6 @@ def main():
     logger.info(f"Extracted activations shape: {activations.shape}")
 
     # ========== Step 3: Train SAE with wandb logging ==========
-    logger.info("\n[Step 2] Training SAE with wandb logging...")
-
     sae = SparseAutoencoder(
         activation_dim=activations.shape[-1],
         hidden_dim=activations.shape[-1] * 8,  # 8x expansion
@@ -102,8 +94,6 @@ def main():
     sae.save("sae_model_wandb.pt")
 
     # ========== Step 4: Visualize with wandb logging ==========
-    logger.info("\n[Step 3] Creating visualizations with wandb logging...")
-
     # Initialize wandb for visualization phase
     with WandbConfig(
         project="drrik-sae-experiments",
@@ -123,19 +113,13 @@ def main():
         # Generate all visualizations (will be logged to wandb)
         visualizer.save_all(n_features=10)
 
-        logger.info("\n" + "=" * 60)
         logger.info("Done! Check wandb for logged metrics and plots.")
         if settings.use_wandb:
             logger.info(f"wandb project: {settings.wandb_project}")
-        logger.info("=" * 60)
 
 
 def example_custom_wandb():
     """Example showing custom wandb configuration."""
-
-    logger.info("\n" + "=" * 60)
-    logger.info("Custom wandb Configuration Example")
-    logger.info("=" * 60)
 
     # Create custom wandb config with specific settings
     wandb_config = WandbConfig(
@@ -174,10 +158,6 @@ def example_custom_wandb():
 def example_wandb_disabled():
     """Example showing how to disable wandb."""
 
-    logger.info("\n" + "=" * 60)
-    logger.info("wandb Disabled Example")
-    logger.info("=" * 60)
-
     # Method 1: Set enabled=False in WandbConfig
     wandb_config = WandbConfig(
         enabled=False,  # Explicitly disable
@@ -203,7 +183,7 @@ def example_wandb_disabled():
         verbose=False,
     )
 
-    logger.info("Training completed without wandb logging")
+    logger.success("Training completed without wandb logging")
 
 
 if __name__ == "__main__":

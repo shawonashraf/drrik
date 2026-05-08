@@ -22,12 +22,6 @@ from drrik.config import (
 def create_custom_pipeline():
     """Create a pipeline with custom configurations."""
 
-    logger.info("=" * 60)
-    logger.info("Drrik Framework - Advanced Pipeline Example")
-    logger.info("=" * 60)
-
-    # ========== Custom Configuration ==========
-
     # Option 1: Use individual config classes
     model_config = ModelConfig(
         model_name="google/gemma-2b",
@@ -56,7 +50,7 @@ def create_custom_pipeline():
     )
 
     # ========== Extract Activations ==========
-    logger.info("\nExtracting activations from multiple layers...")
+    logger.info("Extracting activations from multiple layers")
 
     activations, metadata = extractor.extract()
 
@@ -86,7 +80,7 @@ def create_custom_pipeline():
     results = {}
 
     for config_dict in configs_to_try:
-        logger.info(f"\nTraining SAE: {config_dict['name']}")
+        logger.info(f"Training SAE: {config_dict['name']}")
 
         sae = SparseAutoencoder(
             activation_dim=activations.shape[-1],
@@ -121,29 +115,27 @@ def create_custom_pipeline():
         }
 
         logger.info(f"Results for {config_dict['name']}:")
-        logger.info(f"  Dead features: {n_dead}/{len(densities)}")
-        logger.info(f"  Active features: {n_active}/{len(densities)}")
-        logger.info(f"  Final loss: {sae.training_losses[-1]:.6f}")
-        logger.info(f"  Final L0: {sae.training_l0_norms[-1]:.2f}")
+        logger.info(f"Dead features: {n_dead}/{len(densities)}")
+        logger.info(f"Active features: {n_active}/{len(densities)}")
+        logger.info(f"Final loss: {sae.training_losses[-1]:.6f}")
+        logger.info(f"Final L0: {sae.training_l0_norms[-1]:.2f}")
 
     # ========== Compare Results ==========
-    logger.info("\n" + "=" * 60)
     logger.info("Comparison of Different SAE Configurations:")
-    logger.info("=" * 60)
 
     for name, metrics in results.items():
-        logger.info(f"\n{name}:")
-        logger.info(f"  Hidden dim: {metrics['sae'].hidden_dim}")
-        logger.info(f"  L1 coefficient: {metrics['sae'].l1_coefficient}")
-        logger.info(f"  Active features: {metrics['active_features']}")
-        logger.info(f"  Final loss: {metrics['final_loss']:.6f}")
-        logger.info(f"  Final L0: {metrics['final_l0']:.2f}")
+        logger.info(f"{name}:")
+        logger.info(f"Hidden dim: {metrics['sae'].hidden_dim}")
+        logger.info(f"L1 coefficient: {metrics['sae'].l1_coefficient}")
+        logger.info(f"Active features: {metrics['active_features']}")
+        logger.info(f"Final loss: {metrics['final_loss']:.6f}")
+        logger.info(f"Final L0: {metrics['final_l0']:.2f}")
 
     # ========== Visualize Best Model ==========
     best_model = min(results.items(), key=lambda x: x[1]["final_loss"])
     best_name, best_metrics = best_model
 
-    logger.info(f"\nCreating visualizations for best model: {best_name}")
+    logger.info(f"Creating visualizations for best model: {best_name}")
 
     visualizer = FeatureVisualizer(
         sae=best_metrics["sae"],
@@ -154,7 +146,7 @@ def create_custom_pipeline():
 
     visualizer.save_all(n_features=15)
 
-    logger.info(f"\nVisualizations saved to ./visualizations_{best_name}/")
+    logger.info(f"Visualizations saved to ./visualizations_{best_name}/")
 
     return results
 
@@ -162,9 +154,7 @@ def create_custom_pipeline():
 def explore_different_datasets():
     """Explore SAE training on different datasets."""
 
-    logger.info("=" * 60)
     logger.info("Exploring Different Datasets")
-    logger.info("=" * 60)
 
     datasets_to_try = [
         {"name": "wikitext", "config": "wikitext-2-raw-v1"},
@@ -172,7 +162,7 @@ def explore_different_datasets():
     ]
 
     for dataset_info in datasets_to_try[:1]:  # Only use wikitext for now
-        logger.info(f"\nProcessing dataset: {dataset_info['name']}")
+        logger.info(f"Processing dataset: {dataset_info['name']}")
 
         extractor = ActivationExtractor(
             model_name="google/gemma-2b",
@@ -184,7 +174,7 @@ def explore_different_datasets():
             batch_size=8,
         )
 
-        activations, metadata = extractor.extract()
+        activations, _ = extractor.extract()
 
         # Train a simple SAE
         sae = SparseAutoencoder(
