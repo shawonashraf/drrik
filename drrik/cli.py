@@ -138,7 +138,11 @@ def extract(
                 "activation_dim": activations.shape[-1],
             }
         )
-        wandb_config.log_model(str(activations_path), "activations")
+        wandb_config.log_artifact(
+            str(output_dir),
+            f"activations-{wandb_config.get_run_id()}",
+            artifact_type="activations",
+        )
         wandb_config.finalize()
 
     logger.info("Extraction complete!")
@@ -266,7 +270,16 @@ def train(
 
     # Log to wandb
     if wandb_config:
-        wandb_config.log_model(str(model_path), "sae_model")
+        wandb_config.log_artifact(
+            str(output_dir),
+            f"sae-model-{wandb_config.get_run_id()}",
+            artifact_type="model",
+        )
+        wandb_config.log_artifact(
+            str(activations),
+            f"activations-{wandb_config.get_run_id()}",
+            artifact_type="activations",
+        )
         wandb_config.finalize()
 
     logger.info("Training complete!")
