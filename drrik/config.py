@@ -66,9 +66,9 @@ class DatasetConfig(BaseModel):
         default="train",
         description="Dataset split to use (train, validation, test)"
     )
-    max_samples: int = Field(
+    num_samples: int = Field(
         ge=1,
-        description="Maximum number of samples to process"
+        description="Number of samples to process"
     )
     text_column: str = Field(
         default="text",
@@ -84,8 +84,8 @@ class DatasetConfig(BaseModel):
 class ActivationExtractorConfig(BaseModel):
     """Configuration for MLP activation extraction using nnsight."""
 
-    model: ModelConfig = Field(default_factory=ModelConfig)
-    dataset: DatasetConfig = Field(default_factory=DatasetConfig)
+    model: Optional[ModelConfig] = Field(default=None)
+    dataset: Optional[DatasetConfig] = Field(default=None)
 
     mlp_layers: List[int] = Field(
         default_factory=lambda: [0],
