@@ -75,6 +75,10 @@ drrik/
 ├── autoencoder.py       # SparseAutoencoder implementation
 ├── visualization.py     # FeatureVisualizer for plots
 └── cli.py               # Click-based CLI (drrik command)
+docs/
+├── drrik.html           # Generated API documentation (pdoc)
+├── index.html           # Docs index page
+└── search.js            # Full-text search index
 ```
 
 ## Key Components
@@ -108,19 +112,19 @@ drrik/
 ## Common Tasks
 
 ### Adding New Model Architecture Support
-Edit [models.py:208](drrik/models.py#L208) in `_get_mlp_layer_name()` to add the MLP path pattern.
+Edit [models.py:224](drrik/models.py#L224) in `_get_mlp_layer_name()` to add the MLP path pattern.
 
 ### Modifying SAE Architecture
-Edit [autoencoder.py:58](drrik/autoencoder.py#L58) in `SparseAutoencoder.__init__()`.
+Edit [autoencoder.py:78](drrik/autoencoder.py#L78) in `SparseAutoencoder.__init__()`.
 
 ### Modifying Dead Neuron Resampling
-Edit [autoencoder.py:200](drrik/autoencoder.py#L200) in `resample_dead_neurons()` and [autoencoder.py:279](drrik/autoencoder.py#L279) in `fit()`.
+Edit [autoencoder.py:226](drrik/autoencoder.py#L226) in `resample_dead_neurons()` and [autoencoder.py:305](drrik/autoencoder.py#L305) in `fit()`.
 
 ### Adding New Visualizations
-Add method to [visualization.py:26](drrik/visualization.py#L26) in `FeatureVisualizer` class.
+Add method to [visualization.py:40](drrik/visualization.py#L40) in `FeatureVisualizer` class.
 
 ### Adding CLI Commands
-Add Click command to [cli.py:28](drrik/cli.py#L28) using the `@cli.command()` decorator.
+Add Click command to [cli.py:42](drrik/cli.py#L42) using the `@cli.command()` decorator.
 
 ## Environment Setup
 
@@ -159,9 +163,22 @@ pytest -m "not slow"      # Skip slow tests
 
 Core: torch, transformers, nnsight, datasets, pydantic, click, wandb, matplotlib, seaborn
 
-Dev: pytest (testing), ruff (linting/formatting), pre-commit (git hooks)
+Dev: pytest (testing), ruff (linting/formatting), pre-commit (git hooks), pdoc (docs generation)
+
+## Docstring & Documentation Conventions
+
+- All modules, classes, and public methods use **Google-style docstrings** (Args, Returns, Raises, Example sections).
+- Docstrings describe the "why" and "how", not just the "what". Include cross-references to the paper where relevant.
+- HTML API documentation is generated with **pdoc** and lives in `docs/`.
+
+### Regenerating Docs
+
+```bash
+.venv/bin/pdoc drrik -o docs --docformat google
+```
 
 ## Entry Points
 
-- **CLI**: `drrik` command → [cli.py:682](drrik/cli.py#L682)
+- **CLI**: `drrik` command → [cli.py:719](drrik/cli.py#L719)
 - **Python API**: `from drrik import ActivationExtractor, SparseAutoencoder, FeatureVisualizer`
+- **API Docs**: [docs/drrik.html](docs/drrik.html)
