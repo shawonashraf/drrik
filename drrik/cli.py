@@ -1,12 +1,25 @@
 """
 Command-line interface for the Drrik framework.
 
-This module provides a CLI for:
-- Loading models and datasets
-- Extracting MLP activations
-- Training sparse autoencoders
-- Visualizing features
-- All configurable via YAML config file
+This module provides a Click-based CLI (``drrik`` command) for running
+the complete activation extraction, SAE training, and visualization
+pipeline from the command line.
+
+Commands:
+    ``drrik init-config``
+        Generate an example YAML configuration file with documented options.
+    ``drrik extract``
+        Load a model and dataset, run inference, and save MLP activations.
+    ``drrik train``
+        Train a sparse autoencoder on previously extracted activations.
+    ``drrik visualize``
+        Generate feature analysis plots from a trained SAE.
+    ``drrik run``
+        Execute the full pipeline (extract -> train -> visualize) using
+        a single YAML configuration file.
+
+All commands accept a YAML config file via the ``--config`` flag and
+support optional Weights & Biases logging via ``--wandb``/``--no-wandb``.
 """
 
 from pathlib import Path
@@ -67,10 +80,15 @@ def extract(
     device: Optional[str],
     wandb: bool,
 ):
-    """
-    Extract MLP activations from a language model.
+    """Extract MLP activations from a language model.
 
-    Loads a model and dataset, runs inference, and saves the MLP activations.
+    Loads a HuggingFace model and dataset, runs inference with nnsight,
+    and saves the resulting MLP layer activations as ``.npy`` files with
+    accompanying ``.pkl`` metadata. Optionally logs extraction metrics
+    and artifacts to Weights & Biases.
+
+    The YAML config file must include ``model_name``, ``dataset_name``,
+    ``mlp_layers``, and ``num_samples`` fields.
     """
     # Load YAML configuration
     with open(config, "r") as f:
@@ -161,7 +179,7 @@ def extract(
     "-a",
     type=click.Path(exists=True),
     default=None,
-    help="Path to activations .pkl file",
+    help="Path to activations .npy file",
 )
 @click.option(
     "--output-dir",
@@ -190,10 +208,17 @@ def train(
     device: Optional[str],
     wandb: bool,
 ):
-    """
-    Train a sparse autoencoder on extracted activations.
+    """Train a sparse autoencoder on extracted activations.
 
-    Loads activations and trains a sparse autoencoder to extract interpretable features.
+    Loads previously extracted MLP activations, constructs a sparse
+    autoencoder with the specified architecture, and trains it with
+    L1-regularized reconstruction loss. The trained model is saved as
+    a ``.pt`` file.
+
+    The YAML config must include ``activation_dim``, ``hidden_dim``,
+    ``l1_coefficient``, and ``num_epochs`` fields. Optional fields
+    control batch size, learning rate, dead neuron resampling, and
+    decoder normalization.
     """
     # Load YAML configuration
     with open(config, "r") as f:
@@ -297,7 +322,7 @@ def train(
     "-a",
     type=click.Path(exists=True),
     default=None,
-    help="Path to activations .pkl file",
+    help="Path to activations .npy file",
 )
 @click.option(
     "--model",
@@ -334,10 +359,16 @@ def visualize(
     n_features: int,
     wandb: bool,
 ):
-    """
-    Visualize sparse autoencoder features.
+    """Visualize sparse autoencoder features.
 
-    Generates plots for feature densities, top activating examples, and more.
+    Loads a trained SAE model and its corresponding activations, then
+    generates a comprehensive set of plots: feature density histograms,
+    training curves, top feature rankings, activation histograms, and
+    per-feature dashboards.
+
+    The ``--n-features`` flag controls how many top features receive
+    detailed dashboards. All plots are saved to ``--output-dir`` and
+    optionally logged to Weights & Biases.
     """
     # Load YAML configuration
     with open(config, "r") as f:
@@ -413,10 +444,16 @@ def visualize(
     help="Enable/disable wandb logging (overrides config)",
 )
 def run(config: Path, wandb: Optional[bool]):
-    """
-    Run the full pipeline: extract -> train -> visualize.
+    """Run the full pipeline: extract -> train -> visualize.
 
-    Uses a single YAML config file to configure all stages.
+    Executes all three stages of the Drrik pipeline using a single
+    YAML configuration file. The ``--wandb`` flag on the command line
+    overrides the ``wandb_enabled`` setting in the config file.
+
+    Outputs are organized under the configured ``output_dir``:
+    - ``activations/``: Raw MLP activations and metadata
+    - ``models/``: Trained SAE model checkpoint
+    - ``visualizations/``: Feature analysis plots
     """
     logger.info("=" * 60)
     logger.info("Drrik CLI - Full Pipeline")
@@ -680,7 +717,12 @@ model_name: "google/gemma-2b"  # HuggingFace model name (<3B for 8GB VRAM)
 
 
 def main():
-    """Entry point for the CLI."""
+    """Entry point for the ``drrik`` CLI.
+
+    Called by the ``drrik`` console script defined in ``pyproject.toml``.
+    Initializes the Click command group and processes command-line
+    arguments.
+    """
     cli(obj={})
 
 

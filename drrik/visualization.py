@@ -1,12 +1,26 @@
 """
 Visualization module for sparse autoencoder features.
 
-This module provides tools for visualizing:
-- Feature densities
-- Top activating examples for each feature
-- Activation histograms
-- Decoder weight distributions
-- Training curves
+This module provides the ``FeatureVisualizer`` class for creating
+publication-quality plots that help interpret learned SAE features.
+
+Available Visualizations:
+    - **Feature density histogram**: Shows the distribution of feature
+      firing rates across the dataset, with log-scale bins.
+    - **Activation histogram**: Per-feature histogram of non-zero
+      activation magnitudes.
+    - **Training curves**: Loss and L0 norm over training epochs.
+    - **Top features bar chart**: Features ranked by density, max
+      activation, or mean activation.
+    - **Feature examples**: Top-k activating examples for a specific
+      feature, optionally showing the original text.
+    - **Decoder weight distributions**: Histogram of decoder weight
+      values for selected features.
+    - **Feature dashboard**: Composite 2x2 grid combining activation
+      histogram, top examples, and decoder weights for a single feature.
+
+All plots can be saved to disk and optionally logged to Weights & Biases
+as images when a ``WandbConfig`` is provided.
 """
 
 from typing import Optional, List, Union, Dict, Any
@@ -98,7 +112,13 @@ class FeatureVisualizer:
                 logger.warning(f"Failed to log {name} to wandb: {e}")
 
     def _compute_features(self) -> None:
-        """Compute sparse feature activations from the SAE."""
+        """Compute sparse feature activations from the SAE.
+
+        Runs the encoder forward pass on the stored activations to
+        produce a matrix of feature activations. The result is stored
+        in ``self.features`` as a numpy array of shape
+        ``(n_samples, hidden_dim)`` and is used by all plotting methods.
+        """
         import torch
 
         self.sae.eval()
@@ -153,9 +173,9 @@ class FeatureVisualizer:
         n_dead = (densities == 0).sum()
         n_active = len(active_densities)
 
-        stats_text = f"Dead features: {n_dead} ({n_dead/len(densities)*100:.1f}%)\n"
+        stats_text = f"Dead features: {n_dead} ({n_dead / len(densities) * 100:.1f}%)\n"
         stats_text += (
-            f"Active features: {n_active} ({n_active/len(densities)*100:.1f}%)\n"
+            f"Active features: {n_active} ({n_active / len(densities) * 100:.1f}%)\n"
         )
         stats_text += f"Median density: {np.median(active_densities):.2e}"
 
@@ -399,9 +419,9 @@ class FeatureVisualizer:
                     text = text.replace("\n", " ").strip()
                     if len(text) > max_text_length:
                         text = text[:max_text_length] + "..."
-                    labels.append(f"{i+1}. {text}")
+                    labels.append(f"{i + 1}. {text}")
                 else:
-                    labels.append(f"{i+1}. (No metadata)")
+                    labels.append(f"{i + 1}. (No metadata)")
 
             ax.set_yticklabels(labels, fontsize=9)
 

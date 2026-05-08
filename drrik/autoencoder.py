@@ -1,11 +1,31 @@
 """
 Sparse Autoencoder implementation for feature extraction.
 
-This module implements a sparse autoencoder as described in the
-"Towards Monosemanticity" paper from Anthropic.
+This module implements a sparse autoencoder as described in Anthropic's
+``Towards Monosemanticity`` paper. The autoencoder learns an overcomplete
+basis of features that are more interpretable than the original MLP neuron
+activations.
 
-The autoencoder learns an overcomplete basis of features that are
-more interpretable than the original MLP neuron activations.
+Key Design Decisions:
+    - **Overcomplete basis**: The hidden dimension is larger than the
+      input dimension, allowing the SAE to represent more features than
+      the original activation space.
+    - **L1 sparsity**: An L1 penalty on the hidden activations encourages
+      each feature to fire rarely, promoting monosemanticity.
+    - **Decoder normalization**: Decoder weight columns are normalized to
+      unit norm after each gradient step to prevent scaling collapse.
+    - **Pre-encoder bias**: A learnable bias is subtracted before encoding
+      and added back after decoding, initialized to the data median.
+    - **Dead neuron resampling**: Neurons that stop firing are periodically
+      resampled using high-loss examples to maintain feature diversity.
+
+Training Pipeline:
+    1. Initialize bias to data median (geometric median approximation)
+    2. Train with Adam optimizer and L1-regularized MSE loss
+    3. Project decoder gradients to be orthogonal to decoder weights
+    4. Normalize decoder weights to unit norm after each step
+    5. Track neuron activity across a sliding window of batches
+    6. Resample dead neurons based on average activity over the window
 """
 
 from typing import Optional, Tuple, Union
@@ -189,7 +209,13 @@ class SparseAutoencoder(nn.Module):
         return mse_loss + l1_loss
 
     def normalize_decoder_weights(self) -> None:
-        """Normalize decoder weights to unit norm."""
+        """Normalize decoder weight columns to unit L2 norm.
+
+        This prevents scaling collapse where the optimizer could
+        trivially reduce the loss by shrinking decoder weights and
+        scaling up encoder weights. Applied after each optimizer step
+        when ``normalize_decoder`` is ``True``.
+        """
         if self.normalize_decoder:
             with torch.no_grad():
                 self.decoder.weight.copy_(
@@ -595,7 +621,16 @@ class SparseAutoencoder(nn.Module):
         return top_k_values, top_k_indices
 
     def save(self, filepath: Union[str, Path]) -> None:
-        """Save model state to disk."""
+        """Save model state, hyperparameters, and training history to disk.
+
+        Saves a dictionary containing the model architecture parameters,
+        state dict, and training loss/L0 history as a PyTorch ``.pt`` file.
+        The file can be loaded with ``SparseAutoencoder.load()``.
+
+        Args:
+            filepath: Path where the model file will be saved. Parent
+                directories are created automatically if they don't exist.
+        """
         filepath = Path(filepath)
         filepath.parent.mkdir(parents=True, exist_ok=True)
 
@@ -613,7 +648,19 @@ class SparseAutoencoder(nn.Module):
 
     @classmethod
     def load(cls, filepath: Union[str, Path]) -> "SparseAutoencoder":
-        """Load model state from disk."""
+        """Load a saved SparseAutoencoder from disk.
+
+        Reconstructs the model from a ``.pt`` file saved by ``save()``,
+        restoring the architecture, learned weights, and training
+        history (losses and L0 norms).
+
+        Args:
+            filepath: Path to the saved ``.pt`` model file.
+
+        Returns:
+            A ``SparseAutoencoder`` instance with restored weights and
+            training metrics.
+        """
         filepath = Path(filepath)
         state = torch.load(filepath, weights_only=False)
 

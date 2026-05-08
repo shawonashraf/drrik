@@ -1,10 +1,23 @@
 """
 Model and activation extraction module using nnsight.
 
-This module provides functionality to:
-1. Load language models from HuggingFace Hub
-2. Load datasets from HuggingFace Hub
-3. Extract MLP activations using the nnsight library
+This module provides the ``ActivationExtractor`` class which orchestrates
+the full activation extraction pipeline:
+
+1. **Model Loading**: Loads a HuggingFace language model via nnsight's
+   ``LanguageModel`` wrapper, supporting gated models with authentication.
+2. **Dataset Loading**: Loads and tokenizes a HuggingFace dataset for
+   inference.
+3. **Activation Extraction**: Runs forward passes through the model,
+   capturing MLP layer outputs at specified layers using nnsight's
+   tracing context.
+4. **Persistence**: Saves and loads extracted activations as ``.npy``
+   files with accompanying ``.pkl`` metadata.
+
+Supported Architectures:
+    The module auto-detects MLP layer paths for common transformer
+    architectures including Gemma, Llama, Phi, GPT-2, Pythia, and
+    BERT. Unknown architectures fall back to common naming patterns.
 """
 
 from typing import Optional, Tuple, Union, Dict, Any
@@ -56,15 +69,33 @@ class ActivationExtractor:
         """
         if config is None:
             model_kwargs = {
-                k: v for k, v in kwargs.items()
-                if k in ("model_name", "revision", "torch_dtype", "device_map", "trust_remote_code")
+                k: v
+                for k, v in kwargs.items()
+                if k
+                in (
+                    "model_name",
+                    "revision",
+                    "torch_dtype",
+                    "device_map",
+                    "trust_remote_code",
+                )
             }
             dataset_kwargs = {
-                k: v for k, v in kwargs.items()
-                if k in ("dataset_name", "dataset_config", "split", "num_samples", "text_column", "max_length")
+                k: v
+                for k, v in kwargs.items()
+                if k
+                in (
+                    "dataset_name",
+                    "dataset_config",
+                    "split",
+                    "num_samples",
+                    "text_column",
+                    "max_length",
+                )
             }
             remaining_kwargs = {
-                k: v for k, v in kwargs.items()
+                k: v
+                for k, v in kwargs.items()
                 if k not in model_kwargs and k not in dataset_kwargs
             }
 
@@ -236,10 +267,23 @@ class ActivationExtractor:
         return common_patterns[0]
 
     def _resolve_layer_path(self, path: str):
-        """Resolve a dotted/bracket path like 'model.layers[0].mlp' to the actual nnsight module."""
+        """Resolve a dotted/bracket path to the actual nnsight module.
+
+        Parses a path string like ``model.layers[0].mlp`` by splitting
+        on dots, handling both attribute access and integer indexing
+        (bracket notation) to navigate the model's module hierarchy.
+
+        Args:
+            path: A dot-separated module path with optional bracket
+                indexing, e.g., ``model.layers[2].mlp``.
+
+        Returns:
+            The resolved nnsight module object corresponding to the
+            given path.
+        """
         obj = self.model
-        for part in re.split(r'\.', path):
-            match = re.match(r'(\w+)\[(\d+)\]', part)
+        for part in re.split(r"\.", path):
+            match = re.match(r"(\w+)\[(\d+)\]", part)
             if match:
                 obj = getattr(obj, match.group(1))[int(match.group(2))]
             else:
@@ -326,9 +370,7 @@ class ActivationExtractor:
                     layer_outputs = []
 
                     # Use nnsight to extract activations
-                    with self.model.trace(
-                        input_ids, attention_mask=attention_mask
-                    ):
+                    with self.model.trace(input_ids, attention_mask=attention_mask):
                         for layer_path in layer_paths:
                             module = self._resolve_layer_path(layer_path)
                             output = module.output.save()

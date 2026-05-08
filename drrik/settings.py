@@ -5,6 +5,18 @@ This module manages:
 - HuggingFace Hub API tokens for gated models
 - Weights & Biases (wandb) API keys for experiment tracking
 - Other environment-based configuration
+
+The module provides two main classes:
+
+- ``EnvironmentSettings``: A Pydantic settings model that loads API keys
+  and configuration from environment variables or a ``.env`` file.
+- ``WandbConfig``: A context manager for wandb experiment tracking that
+  handles initialization, metric logging, artifact storage, and cleanup.
+
+Global State:
+    A singleton ``EnvironmentSettings`` instance is maintained via
+    ``get_settings()`` and can be reloaded with ``reload_settings()``
+    when environment variables change.
 """
 
 import os
@@ -74,7 +86,18 @@ class EnvironmentSettings(BaseSettings):
     @field_validator("wandb_mode")
     @classmethod
     def validate_wandb_mode(cls, v: str) -> str:
-        """Validate wandb mode."""
+        """Validate that the wandb mode is one of the allowed values.
+
+        Args:
+            v: The wandb mode string to validate.
+
+        Returns:
+            The lowercased wandb mode string.
+
+        Raises:
+            ValueError: If the mode is not ``online``, ``offline``,
+                or ``disabled``.
+        """
         valid_modes = ["online", "offline", "disabled"]
         v = v.lower()
         if v not in valid_modes:
@@ -84,7 +107,14 @@ class EnvironmentSettings(BaseSettings):
     @field_validator("huggingface_hub_token")
     @classmethod
     def validate_hf_token(cls, v: Optional[str]) -> Optional[str]:
-        """Log if HF token is provided."""
+        """Log a confirmation message when an HF token is provided.
+
+        Args:
+            v: The HuggingFace Hub token string, or ``None``.
+
+        Returns:
+            The unmodified token string.
+        """
         if v:
             logger.info("HuggingFace Hub token is configured")
         return v
@@ -92,27 +122,47 @@ class EnvironmentSettings(BaseSettings):
     @field_validator("wandb_api_key")
     @classmethod
     def validate_wandb_key(cls, v: Optional[str]) -> Optional[str]:
-        """Log if wandb key is provided."""
+        """Log a confirmation message when a wandb API key is provided.
+
+        Args:
+            v: The Weights & Biases API key string, or ``None``.
+
+        Returns:
+            The unmodified API key string.
+        """
         if v:
             logger.info("Weights & Biases API key is configured")
         return v
 
     @property
     def use_wandb(self) -> bool:
-        """Check if wandb should be enabled based on API key and mode."""
+        """Check if wandb should be enabled based on API key and mode.
+
+        Returns:
+            ``True`` if an API key is set and wandb mode is not
+            ``disabled``, ``False`` otherwise.
+        """
         return self.wandb_api_key is not None and self.wandb_mode != "disabled"
 
     @property
     def has_hf_token(self) -> bool:
-        """Check if HF token is available."""
+        """Check if a HuggingFace Hub token is available.
+
+        Returns:
+            ``True`` if ``huggingface_hub_token`` is set, ``False``
+            otherwise.
+        """
         return self.huggingface_hub_token is not None
 
     def get_hf_auth(self) -> Optional[tuple]:
-        """
-        Get HuggingFace authentication tuple.
+        """Get HuggingFace authentication tuple for model loading.
+
+        Constructs the authentication argument expected by the
+        ``transformers`` library when loading gated models.
 
         Returns:
-            Tuple of (token, ) or None if no token is set
+            A tuple of ``(True, token_string)`` if a token is
+            configured, otherwise ``None``.
         """
         if self.has_hf_token:
             return (True, self.huggingface_hub_token)
@@ -346,24 +396,48 @@ class WandbConfig:
                 logger.error(f"Error logging artifact to wandb: {e}")
 
     def get_run_url(self) -> Optional[str]:
-        """Get the wandb run URL."""
+        """Get the wandb run URL for the current experiment.
+
+        Returns:
+            The URL string of the active wandb run, or ``None`` if
+            no run has been initialized.
+        """
         if self._run:
             return self._run.url
         return None
 
     def get_run_id(self) -> Optional[str]:
-        """Get the wandb run ID."""
+        """Get the wandb run ID for the current experiment.
+
+        Returns:
+            The unique run identifier string, or ``None`` if no run
+            has been initialized.
+        """
         if self._run:
             return self._run.id
         return None
 
     def __enter__(self):
-        """Context manager entry."""
+        """Enter the context manager, initializing the wandb run.
+
+        Returns:
+            The ``WandbConfig`` instance for use within the ``with``
+            block.
+        """
         self.initialize()
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        """Context manager exit."""
+        """Exit the context manager, finalizing the wandb run.
+
+        Args:
+            exc_type: Exception type, if an exception was raised.
+            exc_val: Exception value, if an exception was raised.
+            exc_tb: Exception traceback, if an exception was raised.
+
+        Returns:
+            ``False`` to propagate any exceptions.
+        """
         self.finalize()
         return False
 
@@ -386,11 +460,14 @@ def get_settings() -> EnvironmentSettings:
 
 
 def reload_settings() -> EnvironmentSettings:
-    """
-    Reload settings from environment variables and .env file.
+    """Reload settings from environment variables and the ``.env`` file.
+
+    Discards the cached global ``EnvironmentSettings`` singleton and
+    creates a fresh instance, picking up any changes to environment
+    variables or the ``.env`` file since the last load.
 
     Returns:
-        The reloaded settings
+        The newly created ``EnvironmentSettings`` instance.
     """
     global _global_settings
     _global_settings = EnvironmentSettings()

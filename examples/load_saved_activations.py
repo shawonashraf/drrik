@@ -32,7 +32,9 @@ def main():
 
     except FileNotFoundError:
         logger.error(f"Could not find activations at {activations_path}")
-        logger.info("Run basic_usage.py first to generate activations, or update the path.")
+        logger.info(
+            "Run basic_usage.py first to generate activations, or update the path."
+        )
         return
 
     # ========== Train SAE on Loaded Data ==========
@@ -92,7 +94,7 @@ def main():
         for i, (val, idx) in enumerate(zip(top_values, top_indices)):
             if idx < len(metadata["samples_metadata"]):
                 text = metadata["samples_metadata"][idx]["text"][:150]
-                logger.info(f"  {i+1}. ({val:.4f}): \"{text}...\"")
+                logger.info(f'  {i + 1}. ({val:.4f}): "{text}..."')
 
     logger.info("\nDone! Check ./visualizations_from_saved/ for plots.")
 

@@ -277,6 +277,16 @@ All plots can be saved locally and optionally logged to wandb.
 
 ## API Reference
 
+The full API documentation with Google-style docstrings is available in the generated docs:
+
+```bash
+# Regenerate docs (requires pdoc)
+.venv/bin/pdoc drrik -o docs --docformat google
+
+# View locally
+open docs/drrik.html
+```
+
 ### ActivationExtractor
 
 ```python
