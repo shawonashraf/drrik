@@ -222,7 +222,7 @@ class WandbConfig:
 
         except ImportError:
             logger.warning(
-                "wandb package not installed. " "Install it with: pip install wandb"
+                "wandb package not installed. Install it with: pip install wandb"
             )
             self.enabled = False
             return False
@@ -294,20 +294,56 @@ class WandbConfig:
         """
         Log a model artifact to wandb.
 
+        Supports both single files and directories.
+
         Args:
-            model_path: Path to the model file
+            model_path: Path to the model file or directory
             name: Artifact name
         """
         if self._initialized:
             try:
                 import wandb
+                from pathlib import Path
 
                 artifact = wandb.Artifact(name, type="model")
-                artifact.add_file(model_path)
+                path = Path(model_path)
+                if path.is_dir():
+                    artifact.add_dir(str(path), name=path.name)
+                else:
+                    artifact.add_file(str(path))
                 wandb.log_artifact(artifact)
-                logger.info(f"Logged model artifact: {name}")
+                logger.info(f"Logged model artifact: {name} from {model_path}")
             except Exception as e:
                 logger.error(f"Error logging model to wandb: {e}")
+
+    def log_artifact(
+        self, path: str, name: str, artifact_type: str = "dataset"
+    ) -> None:
+        """
+        Log a dataset artifact to wandb.
+
+        Supports both single files and directories.
+
+        Args:
+            path: Path to the file or directory
+            name: Artifact name
+            artifact_type: Type of artifact (dataset, model, config, etc.)
+        """
+        if self._initialized:
+            try:
+                import wandb
+                from pathlib import Path
+
+                artifact = wandb.Artifact(name, type=artifact_type)
+                p = Path(path)
+                if p.is_dir():
+                    artifact.add_dir(str(p), name=p.name)
+                else:
+                    artifact.add_file(str(p))
+                wandb.log_artifact(artifact)
+                logger.info(f"Logged {artifact_type} artifact: {name} from {path}")
+            except Exception as e:
+                logger.error(f"Error logging artifact to wandb: {e}")
 
     def get_run_url(self) -> Optional[str]:
         """Get the wandb run URL."""
