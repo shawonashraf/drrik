@@ -41,7 +41,7 @@ def create_custom_pipeline():
         dataset_name="wikitext",
         dataset_config="wikitext-2-raw-v1",
         split="train",
-        max_samples=2000,
+        num_samples=2000,
         max_length=256,
     )
 

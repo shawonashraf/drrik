@@ -22,7 +22,7 @@ from nnsight import LanguageModel
 
 from loguru import logger
 
-from drrik.config import ActivationExtractorConfig
+from drrik.config import ActivationExtractorConfig, ModelConfig, DatasetConfig
 from drrik.settings import get_settings
 
 
@@ -51,15 +51,31 @@ class ActivationExtractor:
         Initialize the ActivationExtractor.
 
         Args:
-            config: Configuration object. If None, uses defaults.
-            **kwargs: Additional config overrides (e.g., model_name="gpt2")
+            config: Configuration object. If None, builds from kwargs.
+            **kwargs: Config overrides (e.g., model_name="gpt2", num_samples=1000)
         """
         if config is None:
-            config = ActivationExtractorConfig()
+            model_kwargs = {
+                k: v for k, v in kwargs.items()
+                if k in ("model_name", "revision", "torch_dtype", "device_map", "trust_remote_code")
+            }
+            dataset_kwargs = {
+                k: v for k, v in kwargs.items()
+                if k in ("dataset_name", "dataset_config", "split", "num_samples", "text_column", "max_length")
+            }
+            remaining_kwargs = {
+                k: v for k, v in kwargs.items()
+                if k not in model_kwargs and k not in dataset_kwargs
+            }
 
-        # Apply any keyword argument overrides
-        if kwargs:
-            config = config.model_copy(update=kwargs)
+            model = ModelConfig(**model_kwargs) if model_kwargs else None
+            dataset = DatasetConfig(**dataset_kwargs) if dataset_kwargs else None
+
+            config = ActivationExtractorConfig(
+                model=model,
+                dataset=dataset,
+                **remaining_kwargs,
+            )
 
         self.config = config
         self.model = None
@@ -257,7 +273,7 @@ class ActivationExtractor:
             self.load_model()
             self.load_dataset()
 
-            n_samples = num_samples or self.config.dataset.max_samples
+            n_samples = num_samples or self.config.dataset.num_samples
             logger.info(
                 f"Extracting activations from {len(self.config.mlp_layers)} MLP layers "
                 f"for {n_samples} samples"

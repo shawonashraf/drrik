@@ -348,7 +348,7 @@ class WandbConfig:
     def get_run_url(self) -> Optional[str]:
         """Get the wandb run URL."""
         if self._run:
-            return self._run.get_url()
+            return self._run.url
         return None
 
     def get_run_id(self) -> Optional[str]:
