@@ -14,7 +14,6 @@ import torch
 from loguru import logger
 
 from drrik import ActivationExtractor, SparseAutoencoder, FeatureVisualizer
-from drrik.config import Config
 
 
 def main():
@@ -59,7 +58,9 @@ def main():
         pre_encoder_bias=True,
     )
 
-    logger.info(f"SAE architecture: {activations.shape[-1]} -> {activations.shape[-1] * 8}")
+    logger.info(
+        f"SAE architecture: {activations.shape[-1]} -> {activations.shape[-1] * 8}"
+    )
 
     # Check if GPU is available
     device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -100,8 +101,12 @@ def main():
     n_dead = (densities == 0).sum()
     n_active = (densities > 0).sum()
 
-    logger.info(f"Dead features: {n_dead}/{len(densities)} ({n_dead/len(densities)*100:.1f}%)")
-    logger.info(f"Active features: {n_active}/{len(densities)} ({n_active/len(densities)*100:.1f}%)")
+    logger.info(
+        f"Dead features: {n_dead}/{len(densities)} ({n_dead / len(densities) * 100:.1f}%)"
+    )
+    logger.info(
+        f"Active features: {n_active}/{len(densities)} ({n_active / len(densities) * 100:.1f}%)"
+    )
     logger.info(f"Median density: {densities[densities > 0].median():.2e}")
 
     # Show top activating examples for a specific feature
@@ -116,7 +121,7 @@ def main():
     for i, (val, idx) in enumerate(zip(top_values, top_indices)):
         if idx < len(metadata["samples_metadata"]):
             text = metadata["samples_metadata"][idx]["text"][:100]
-            logger.info(f"  {i+1}. activation={val:.4f}: \"{text}...\"")
+            logger.info(f'  {i + 1}. activation={val:.4f}: "{text}..."')
 
     logger.info("\n" + "=" * 60)
     logger.info("Done! Check the ./visualizations directory for plots.")

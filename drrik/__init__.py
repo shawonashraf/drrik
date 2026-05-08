@@ -1,17 +1,34 @@
 """
 Drrik: A Framework for Monosemantic Feature Extraction from Language Models
 
-This framework is inspired by the "Towards Monosemanticity" paper from Anthropic,
-which applies dictionary learning to extract activations as features from transformer
-based large language models and trains sparse autoencoders to linearize those activations.
+This framework is inspired by the ``Towards Monosemanticity`` paper from
+Anthropic, which applies dictionary learning to extract activations as
+features from transformer-based large language models and trains sparse
+autoencoders to linearize those activations.
 
 Key Components:
-- Model loading from HuggingFace Hub (with gated model support)
-- Dataset loading and inference pipeline
-- MLP activation collection using nnsight
-- Sparse Autoencoder training for feature extraction
-- Visualization of feature-specific activation vectors
-- Optional Weights & Biases integration for experiment tracking
+    - **Model loading** from HuggingFace Hub (with gated model support)
+    - **Dataset loading** and inference pipeline
+    - **MLP activation collection** using nnsight
+    - **Sparse Autoencoder training** for feature extraction
+    - **Visualization** of feature-specific activation vectors
+    - Optional **Weights & Biases** integration for experiment tracking
+
+Public API:
+    ``ActivationExtractor``
+        Loads models and datasets, extracts MLP activations via nnsight.
+    ``SparseAutoencoder``
+        Overcomplete SAE with L1 regularization and dead neuron resampling.
+    ``FeatureVisualizer``
+        Generates density histograms, training curves, and feature dashboards.
+    ``Config``
+        Top-level Pydantic settings model aggregating all sub-configurations.
+    ``EnvironmentSettings``
+        Loads API keys and environment variables from ``.env``.
+    ``WandbConfig``
+        Context manager for wandb experiment tracking.
+    ``get_settings``
+        Returns the global ``EnvironmentSettings`` singleton.
 
 Example Usage:
     from drrik import ActivationExtractor, SparseAutoencoder, FeatureVisualizer
@@ -35,7 +52,7 @@ Example Usage:
     sae.fit(activations, wandb_enabled=True)
 
     # Visualize features (with optional wandb logging)
-    visualizer = FeatureVisualizer(sae)
+    visualizer = FeatureVisualizer(sae, activations)
     visualizer.plot_feature_density()
     visualizer.plot_top_activating_examples()
 """

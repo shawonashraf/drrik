@@ -13,11 +13,9 @@ from loguru import logger
 
 from drrik import ActivationExtractor, SparseAutoencoder, FeatureVisualizer
 from drrik.config import (
-    Config,
     ActivationExtractorConfig,
     ModelConfig,
     DatasetConfig,
-    SparseAutoencoderConfig,
 )
 
 
