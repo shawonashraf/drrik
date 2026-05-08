@@ -25,3 +25,6 @@ sae_*.pt
 
 # wandb
 wandb/
+
+# config files
+config.yml

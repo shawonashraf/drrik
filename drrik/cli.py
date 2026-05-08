@@ -416,62 +416,34 @@ def run(config: Optional[Path]):
     wandb_enabled = cfg.get("wandb_enabled", True)
 
     # Run extract
-    ctx = cli.make_context(
-        "extract",
-        [
-            "--config",
-            str(config),
-            "--output-dir",
-            str(output_dir / "activations"),
-            "--device",
-            device or "auto",
-        ],
+    logger.info("Step 1/3: Extracting activations...")
+    extract.callback(
+        config=config,
+        output_dir=output_dir / "activations",
+        device=device,
+        wandb=wandb_enabled,
     )
-    with ctx:
-        extract(config, output_dir / "activations", device, wandb_enabled)
 
     # Run train
-    ctx = cli.make_context(
-        "train",
-        [
-            "--config",
-            str(config),
-            "--activations",
-            str(output_dir / "activations" / "activations.pkl"),
-            "--output-dir",
-            str(output_dir / "models"),
-            "--device",
-            device or "auto",
-        ],
+    logger.info("Step 2/3: Training sparse autoencoder...")
+    train.callback(
+        config=config,
+        activations=output_dir / "activations" / "activations.pkl",
+        output_dir=output_dir / "models",
+        device=device,
+        wandb=wandb_enabled,
     )
-    with ctx:
-        train(config, None, output_dir / "models", device, wandb_enabled)
 
     # Run visualize
-    ctx = cli.make_context(
-        "visualize",
-        [
-            "--config",
-            str(config),
-            "--activations",
-            str(output_dir / "activations" / "activations.pkl"),
-            "--model",
-            str(output_dir / "models" / "sae_model.pt"),
-            "--output-dir",
-            str(output_dir / "visualizations"),
-            "--n-features",
-            cfg.get("n_features_to_visualize", 10),
-        ],
+    logger.info("Step 3/3: Generating visualizations...")
+    visualize.callback(
+        config=config,
+        activations=output_dir / "activations" / "activations.pkl",
+        model=output_dir / "models" / "sae_model.pt",
+        output_dir=output_dir / "visualizations",
+        n_features=cfg.get("n_features_to_visualize", 10),
+        wandb=wandb_enabled,
     )
-    with ctx:
-        visualize(
-            config,
-            None,
-            None,
-            output_dir / "visualizations",
-            cfg.get("n_features_to_visualize", 10),
-            wandb_enabled,
-        )
 
     logger.info("=" * 60)
     logger.info("Pipeline complete!")
