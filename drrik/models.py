@@ -22,7 +22,7 @@ from nnsight import LanguageModel
 
 from loguru import logger
 
-from drrik.config import ActivationExtractorConfig
+from drrik.config import ActivationExtractorConfig, ModelConfig, DatasetConfig
 from drrik.settings import get_settings
 
 
@@ -51,15 +51,31 @@ class ActivationExtractor:
         Initialize the ActivationExtractor.
 
         Args:
-            config: Configuration object. If None, uses defaults.
-            **kwargs: Additional config overrides (e.g., model_name="gpt2")
+            config: Configuration object. If None, builds from kwargs.
+            **kwargs: Config overrides (e.g., model_name="gpt2", num_samples=1000)
         """
         if config is None:
-            config = ActivationExtractorConfig()
+            model_kwargs = {
+                k: v for k, v in kwargs.items()
+                if k in ("model_name", "revision", "torch_dtype", "device_map", "trust_remote_code")
+            }
+            dataset_kwargs = {
+                k: v for k, v in kwargs.items()
+                if k in ("dataset_name", "dataset_config", "split", "num_samples", "text_column", "max_length")
+            }
+            remaining_kwargs = {
+                k: v for k, v in kwargs.items()
+                if k not in model_kwargs and k not in dataset_kwargs
+            }
 
-        # Apply any keyword argument overrides
-        if kwargs:
-            config = config.model_copy(update=kwargs)
+            model = ModelConfig(**model_kwargs) if model_kwargs else None
+            dataset = DatasetConfig(**dataset_kwargs) if dataset_kwargs else None
+
+            config = ActivationExtractorConfig(
+                model=model,
+                dataset=dataset,
+                **remaining_kwargs,
+            )
 
         self.config = config
         self.model = None
@@ -257,7 +273,7 @@ class ActivationExtractor:
             self.load_model()
             self.load_dataset()
 
-            n_samples = num_samples or self.config.dataset.max_samples
+            n_samples = num_samples or self.config.dataset.num_samples
             logger.info(
                 f"Extracting activations from {len(self.config.mlp_layers)} MLP layers "
                 f"for {n_samples} samples"
@@ -372,31 +388,36 @@ class ActivationExtractor:
         self,
         activations: np.ndarray,
         metadata: Dict[str, Any],
-        filepath: Optional[Union[str, Path]] = None,
+        output_dir: Optional[Union[str, Path]] = None,
     ) -> Path:
         """
         Save extracted activations to disk.
 
+        Saves activations.npy and metadata.pkl to the output directory.
+
         Args:
             activations: The activations array
             metadata: Metadata dictionary
-            filepath: Path to save to. If None, uses config output_dir
+            output_dir: Directory to save to. If None, uses config output_dir
 
         Returns:
             Path where activations were saved
         """
-        if filepath is None:
-            filepath = self.config.output_dir / "activations.pkl"
+        if output_dir is None:
+            output_dir = self.config.output_dir
 
-        filepath = Path(filepath)
+        output_dir = Path(output_dir)
+        output_dir.mkdir(parents=True, exist_ok=True)
 
-        data = {"activations": activations, "metadata": metadata}
+        activations_path = output_dir / "activations.npy"
+        np.save(str(activations_path), activations)
 
-        with open(filepath, "wb") as f:
-            pickle.dump(data, f)
+        metadata_path = output_dir / "metadata.pkl"
+        with open(metadata_path, "wb") as f:
+            pickle.dump(metadata, f)
 
-        logger.info(f"Saved activations to {filepath}")
-        return filepath
+        logger.info(f"Saved activations to {activations_path}")
+        return activations_path
 
     def load_activations(
         self,
@@ -405,16 +426,26 @@ class ActivationExtractor:
         """
         Load saved activations from disk.
 
+        Supports both .pkl (legacy) and .npy formats.
+
         Args:
-            filepath: Path to load from
+            filepath: Path to activations .pkl or .npy file
 
         Returns:
             Tuple of (activations array, metadata dict)
         """
         filepath = Path(filepath)
 
-        with open(filepath, "rb") as f:
-            data = pickle.load(f)
+        if filepath.suffix == ".npy":
+            activations = np.load(str(filepath))
+            metadata_path = filepath.parent / "metadata.pkl"
+            with open(metadata_path, "rb") as f:
+                metadata = pickle.load(f)
+        else:
+            with open(filepath, "rb") as f:
+                data = pickle.load(f)
+            activations = data["activations"]
+            metadata = data["metadata"]
 
         logger.info(f"Loaded activations from {filepath}")
-        return data["activations"], data["metadata"]
+        return activations, metadata

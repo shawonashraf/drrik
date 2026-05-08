@@ -8,7 +8,7 @@ activation extraction and sparse autoencoder training.
 from typing import List, Optional, Union
 from pathlib import Path
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from pydantic_settings import BaseSettings
 
 
@@ -66,10 +66,9 @@ class DatasetConfig(BaseModel):
         default="train",
         description="Dataset split to use (train, validation, test)"
     )
-    max_samples: int = Field(
-        default=1000,
+    num_samples: int = Field(
         ge=1,
-        description="Maximum number of samples to process"
+        description="Number of samples to process"
     )
     text_column: str = Field(
         default="text",
@@ -85,8 +84,8 @@ class DatasetConfig(BaseModel):
 class ActivationExtractorConfig(BaseModel):
     """Configuration for MLP activation extraction using nnsight."""
 
-    model: ModelConfig = Field(default_factory=ModelConfig)
-    dataset: DatasetConfig = Field(default_factory=DatasetConfig)
+    model: Optional[ModelConfig] = Field(default=None)
+    dataset: Optional[DatasetConfig] = Field(default=None)
 
     mlp_layers: List[int] = Field(
         default_factory=lambda: [0],
@@ -213,9 +212,10 @@ class Config(BaseSettings):
         description="Logging level (DEBUG, INFO, WARNING, ERROR)"
     )
 
-    class Config:
-        env_prefix = "DRIK_"
-        env_nested_delimiter = "__"
+    model_config = ConfigDict(
+        env_prefix="DRIK_",
+        env_nested_delimiter="__",
+    )
 
     def create_output_dirs(self) -> None:
         """Create output directories if they don't exist."""

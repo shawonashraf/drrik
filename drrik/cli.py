@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Optional
 
 import click
+import numpy as np
 import yaml
 from loguru import logger
 
@@ -115,14 +116,13 @@ def extract(
     # Extract activations
     activations, metadata = extractor.extract()
 
-    # Save activations
-    import pickle
-
-    activations_path = output_dir / "activations.pkl"
+    # Save activations as numpy files
+    activations_path = output_dir / "activations.npy"
     metadata_path = output_dir / "metadata.pkl"
 
-    with open(activations_path, "wb") as f:
-        pickle.dump({"activations": activations, "metadata": metadata}, f)
+    np.save(str(activations_path), activations)
+
+    import pickle
 
     with open(metadata_path, "wb") as f:
         pickle.dump(metadata, f)
@@ -138,7 +138,11 @@ def extract(
                 "activation_dim": activations.shape[-1],
             }
         )
-        wandb_config.log_model(str(activations_path), "activations")
+        wandb_config.log_artifact(
+            str(output_dir),
+            f"activations-{wandb_config.get_run_id()}",
+            artifact_type="activations",
+        )
         wandb_config.finalize()
 
     logger.info("Extraction complete!")
@@ -204,15 +208,18 @@ def train(
     logger.info(f"Expansion Factor: {cfg['hidden_dim'] / cfg['activation_dim']}")
 
     # Load activations
-    if activations is None:
-        activations = Path(
-            cfg.get("activations_path", "./drrik_output/activations/activations.pkl")
+    activations_path = (
+        Path(activations)
+        if activations
+        else Path(
+            cfg.get("activations_path", "./drrik_output/activations/activations.npy")
         )
+    )
 
     from drrik.models import ActivationExtractor
 
     extractor = ActivationExtractor()
-    activations, metadata = extractor.load_activations(activations)
+    activations, metadata = extractor.load_activations(activations_path)
 
     # Setup wandb
     wandb_config = None
@@ -233,10 +240,6 @@ def train(
         normalize_decoder=cfg.get("normalize_decoder", True),
         pre_encoder_bias=cfg.get("pre_encoder_bias", True),
     )
-
-    # Determine device
-    if device is None:
-        device = cfg.get("device", "auto")
 
     # Train
     logger.info("Starting training...")
@@ -266,7 +269,16 @@ def train(
 
     # Log to wandb
     if wandb_config:
-        wandb_config.log_model(str(model_path), "sae_model")
+        wandb_config.log_artifact(
+            str(output_dir),
+            f"sae-model-{wandb_config.get_run_id()}",
+            artifact_type="model",
+        )
+        wandb_config.log_artifact(
+            str(activations_path.parent),
+            f"activations-{wandb_config.get_run_id()}",
+            artifact_type="activations",
+        )
         wandb_config.finalize()
 
     logger.info("Training complete!")
@@ -338,13 +350,16 @@ def visualize(
     # Load activations and model
     from drrik.models import ActivationExtractor
 
-    if activations is None:
-        activations = Path(
-            cfg.get("activations_path", "./drrik_output/activations/activations.pkl")
+    activations_path = (
+        Path(activations)
+        if activations
+        else Path(
+            cfg.get("activations_path", "./drrik_output/activations/activations.npy")
         )
+    )
 
     extractor = ActivationExtractor()
-    activations, metadata = extractor.load_activations(activations)
+    activations, metadata = extractor.load_activations(activations_path)
 
     if model is None:
         model = Path(cfg.get("sae_model_path", "./drrik_output/models/sae_model.pt"))
@@ -385,20 +400,24 @@ def visualize(
 
 
 @cli.command()
-@click.argument(
-    "config",
+@click.option(
+    "--config",
+    "-c",
     type=click.Path(exists=True),
-    required=False,
+    default="config.yml",
+    help="Path to YAML configuration file",
 )
-def run(config: Optional[Path]):
+@click.option(
+    "--wandb/--no-wandb",
+    default=None,
+    help="Enable/disable wandb logging (overrides config)",
+)
+def run(config: Path, wandb: Optional[bool]):
     """
     Run the full pipeline: extract -> train -> visualize.
 
     Uses a single YAML config file to configure all stages.
     """
-    if config is None:
-        config = Path("config.yml")
-
     logger.info("=" * 60)
     logger.info("Drrik CLI - Full Pipeline")
     logger.info("=" * 60)
@@ -410,39 +429,132 @@ def run(config: Optional[Path]):
 
     # Get shared settings
     output_dir = Path(cfg.get("output_dir", "./drrik_output"))
-    extraction_device = cfg.get("extraction_device", None)
     training_device = cfg.get("training_device", None)
-    wandb_enabled = cfg.get("wandb_enabled", True)
 
-    # Run extract
+    # CLI flag overrides config file
+    if wandb is None:
+        wandb = cfg.get("wandb_enabled", True)
+
+    # Single shared wandb config for all stages
+    wandb_config = None
+    if wandb:
+        wandb_config = WandbConfig(
+            project=cfg.get("wandb_project", "drrik-experiments"),
+            name=cfg.get("wandb_run_name"),
+            config=cfg,
+            enabled=get_settings().use_wandb,
+        )
+        wandb_config.initialize()
+
+    # ----------------------------------------------------------------
+    # Step 1: Extract activations
+    # ----------------------------------------------------------------
     logger.info("Step 1/3: Extracting activations...")
-    extract.callback(
-        config=config,
-        output_dir=output_dir / "activations",
-        device=extraction_device,
-        wandb=wandb_enabled,
+
+    extractor = ActivationExtractor(
+        model_name=cfg["model_name"],
+        dataset_name=cfg["dataset_name"],
+        dataset_config=cfg.get("dataset_config"),
+        split=cfg.get("split", "train"),
+        mlp_layers=cfg["mlp_layers"],
+        num_samples=cfg["num_samples"],
+        batch_size=cfg.get("extraction_batch_size", 8),
     )
 
-    # Run train
+    activations, metadata = extractor.extract()
+
+    activations_dir = output_dir / "activations"
+    activations_dir.mkdir(parents=True, exist_ok=True)
+    activations_path = activations_dir / "activations.npy"
+    metadata_path = activations_dir / "metadata.pkl"
+
+    np.save(str(activations_path), activations)
+
+    import pickle
+
+    with open(metadata_path, "wb") as f:
+        pickle.dump(metadata, f)
+
+    logger.info(f"Saved activations to {activations_path}")
+
+    if wandb_config:
+        wandb_config.log_metrics(
+            {
+                "n_samples": len(activations),
+                "activation_dim": activations.shape[-1],
+                "stage": "extract",
+            }
+        )
+        wandb_config.log_artifact(
+            str(activations_dir),
+            f"activations-{wandb_config.get_run_id()}",
+            artifact_type="activations",
+        )
+
+    # ----------------------------------------------------------------
+    # Step 2: Train SAE
+    # ----------------------------------------------------------------
     logger.info("Step 2/3: Training sparse autoencoder...")
-    train.callback(
-        config=config,
-        activations=output_dir / "activations" / "activations.pkl",
-        output_dir=output_dir / "models",
-        device=training_device,
-        wandb=wandb_enabled,
+
+    sae = SparseAutoencoder(
+        activation_dim=cfg["activation_dim"],
+        hidden_dim=cfg["hidden_dim"],
+        l1_coefficient=cfg["l1_coefficient"],
+        normalize_decoder=cfg.get("normalize_decoder", True),
+        pre_encoder_bias=cfg.get("pre_encoder_bias", True),
     )
 
-    # Run visualize
-    logger.info("Step 3/3: Generating visualizations...")
-    visualize.callback(
-        config=config,
-        activations=output_dir / "activations" / "activations.pkl",
-        model=output_dir / "models" / "sae_model.pt",
-        output_dir=output_dir / "visualizations",
-        n_features=cfg.get("n_features_to_visualize", 10),
-        wandb=wandb_enabled,
+    sae.fit(
+        activations,
+        batch_size=cfg.get("training_batch_size", 256),
+        num_epochs=cfg["num_epochs"],
+        learning_rate=cfg.get("learning_rate", 1e-4),
+        validation_split=cfg.get("validation_split", 0.1),
+        resample_dead_neurons=cfg.get("resample_dead_neurons", True),
+        resample_interval=cfg.get("resample_interval", 10000),
+        device=training_device,
+        wandb_config=wandb_config,
+        wandb_enabled=wandb and wandb_config is not None,
+        verbose=True,
     )
+
+    models_dir = output_dir / "models"
+    models_dir.mkdir(parents=True, exist_ok=True)
+    sae.save(models_dir / "sae_model.pt")
+    logger.info(f"Saved model to {models_dir / 'sae_model.pt'}")
+
+    if wandb_config:
+        wandb_config.log_artifact(
+            str(models_dir),
+            f"sae-model-{wandb_config.get_run_id()}",
+            artifact_type="model",
+        )
+        wandb_config.log_artifact(
+            str(activations_dir),
+            f"activations-{wandb_config.get_run_id()}",
+            artifact_type="activations",
+        )
+
+    # ----------------------------------------------------------------
+    # Step 3: Visualize
+    # ----------------------------------------------------------------
+    logger.info("Step 3/3: Generating visualizations...")
+
+    sae = SparseAutoencoder.load(models_dir / "sae_model.pt")
+
+    visualizer = FeatureVisualizer(
+        sae=sae,
+        activations=activations,
+        metadata=metadata,
+        output_dir=output_dir / "visualizations",
+        wandb_config=wandb_config,
+        log_to_wandb=wandb,
+    )
+    visualizer.save_all(n_features=cfg.get("n_features_to_visualize", 10))
+
+    # Finalize wandb once
+    if wandb_config:
+        wandb_config.finalize()
 
     logger.info("=" * 60)
     logger.info("Pipeline complete!")
@@ -483,7 +595,7 @@ model_name: "google/gemma-2b"  # HuggingFace model name (<3B for 8GB VRAM)
 # dataset_name: "wikitext"         # HuggingFace dataset name
 # dataset_config: "wikitext-2-raw-v1"  # Dataset configuration name
 # split: "train"                    # Dataset split: train, validation, test
-# max_samples: 1000                # Number of samples to process
+# num_samples: 1000                # Number of samples to process
 # max_length: 512                  # Maximum sequence length
 # text_column: "text"               # Name of text column in dataset
 # extraction_batch_size: 8              # Batch size for inference
@@ -564,7 +676,7 @@ model_name: "google/gemma-2b"  # HuggingFace model name (<3B for 8GB VRAM)
 
     logger.info(f"Example configuration written to {output}")
     logger.info("Edit the file to customize your pipeline, then run:")
-    logger.info(f"  drrik run {output}")
+    logger.info(f"  drrik run -c {output}")
 
 
 def main():

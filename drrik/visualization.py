@@ -102,8 +102,9 @@ class FeatureVisualizer:
         import torch
 
         self.sae.eval()
+        device = next(self.sae.parameters()).device
         with torch.no_grad():
-            activations_tensor = torch.from_numpy(self.activations).float()
+            activations_tensor = torch.from_numpy(self.activations).float().to(device)
             self.features = self.sae.encode(activations_tensor).cpu().numpy()
 
         logger.info(f"Computed features with shape: {self.features.shape}")

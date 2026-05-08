@@ -45,9 +45,9 @@ def test_dataset_config_creation():
     """Test that DatasetConfig can be created."""
     from drrik.config import DatasetConfig
 
-    dataset_cfg = DatasetConfig(dataset_name="wikitext")
+    dataset_cfg = DatasetConfig(dataset_name="wikitext", num_samples=1000)
     assert dataset_cfg.dataset_name == "wikitext"
-    assert dataset_cfg.max_samples == 1000
+    assert dataset_cfg.num_samples == 1000
 
 
 def test_extractor_config_creation():
@@ -59,7 +59,7 @@ def test_extractor_config_creation():
     )
 
     model_cfg = ModelConfig(model_name="google/gemma-2b")
-    dataset_cfg = DatasetConfig(dataset_name="wikitext")
+    dataset_cfg = DatasetConfig(dataset_name="wikitext", num_samples=1000)
 
     extractor_cfg = ActivationExtractorConfig(
         model=model_cfg,

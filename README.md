@@ -114,14 +114,15 @@ The CLI uses YAML configuration files for easy setup:
 # Model configuration
 model_name: "google/gemma-2b"
 torch_dtype: "float16"
-device_map: "auto"
+device_map: "cpu"
 
 # Dataset configuration
 dataset_name: "wikitext"
 dataset_config: "wikitext-2-raw-v1"
 split: "train"
 num_samples: 1000
-batch_size: 8
+max_length: 512
+extraction_batch_size: 8
 
 # Activation extraction
 mlp_layers: [0]
@@ -132,14 +133,19 @@ hidden_dim: 16384  # 8x expansion
 l1_coefficient: 0.01
 learning_rate: 0.0001
 num_epochs: 50
+training_batch_size: 256
 validation_split: 0.1
 resample_dead_neurons: true
 
 # Visualization
 n_features_to_visualize: 10
 
+# Hardware configuration
+extraction_device: "cpu"
+training_device: "mps"
+
 # Wandb integration (optional)
-wandb_enabled: true
+wandb_enabled: false
 wandb_project: "drrik-experiments"
 
 # Output
@@ -164,7 +170,7 @@ config = ActivationExtractorConfig(
     ),
     dataset=DatasetConfig(
         dataset_name="wikitext",
-        max_samples=1000,
+        num_samples=1000,
         max_length=512,
     ),
     mlp_layers=[0, 1, 2],
@@ -207,17 +213,13 @@ WANDB_MODE=online  # or 'offline' to disable
 
 ### Supported Models
 
-Any HuggingFace transformer model with MLP layers. Recommended for 8GB VRAM:
-- `google/gemma-2b` (2B parameters)
-- `microsoft/phi-2` (2.7B parameters)
-- `TinyLlama/TinyLlama-1.1B-Chat-v1.0` (1.1B parameters)
+Any HuggingFace transformer model with MLP layers. 
+
+> [!NOTE] **For Apple Silicon users**: Models like gemma-2b have internal weight matrices that exceed MPS kernel limits. Use `device_map: "cpu"` for activation extraction and `training_device: "mps"` for SAE training or, use a smaller batch size and hidden dimension (meaning a smaller expansion factor).
 
 ### Supported Datasets
 
-Any dataset from HuggingFace Datasets. Common choices:
-- `wikitext` - Wikipedia text
-- `pile` - The Pile dataset
-- `c4` - Colossal Clean Crawled Corpus
+Any dataset from HuggingFace Datasets.
 
 ### SAE Features
 
@@ -226,7 +228,7 @@ Following the Anthropic paper:
 - **L1 sparsity**: Encourages sparse feature activations
 - **Decoder normalization**: Prevents scaling collapse
 - **Pre-encoder bias**: As used in the paper
-- **Dead neuron resampling**: Reinitializes inactive neurons during training
+- **Dead neuron resampling**: Reinitializes inactive neurons during training using a sliding window of recent batches for robust detection
 
 ### Wandb Integration
 
@@ -279,11 +281,11 @@ All plots can be saved locally and optionally logged to wandb.
 
 ```python
 extractor = ActivationExtractor(
-    model_name: str = "google/gemma-2b",
-    dataset_name: str = "wikitext",
-    mlp_layers: List[int] = [0],
-    num_samples: int = 1000,
-    batch_size: int = 8,
+    model_name="google/gemma-2b",
+    dataset_name="wikitext",
+    num_samples=1000,
+    mlp_layers=[0],
+    batch_size=8,
 )
 
 activations, metadata = extractor.extract()
@@ -304,6 +306,9 @@ sae.fit(
     num_epochs: int = 100,
     learning_rate: float = 1e-4,
     resample_dead_neurons: bool = True,
+    resample_interval: int = 10000,
+    dead_threshold: float = 1e-8,
+    window_size: int = 100,
     wandb_config: Optional[WandbConfig] = None,
     wandb_enabled: bool = False,
 )
