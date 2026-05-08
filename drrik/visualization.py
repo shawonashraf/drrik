@@ -46,10 +46,12 @@ class FeatureVisualizer:
     "Towards Monosemanticity" paper.
 
     Example:
+        ```python
         visualizer = FeatureVisualizer(sae, activations, metadata)
         visualizer.plot_feature_density()
         visualizer.plot_top_features(n_features=10)
         visualizer.plot_feature_examples(feature_idx=0)
+        ```
     """
 
     def __init__(

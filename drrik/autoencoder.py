@@ -65,6 +65,7 @@ class SparseAutoencoder(nn.Module):
         post_decoder_bias: Learnable bias added to output (tied to pre_encoder_bias)
 
     Example:
+        ```python
         sae = SparseAutoencoder(
             activation_dim=2048,
             hidden_dim=4096,  # 2x expansion
@@ -73,6 +74,7 @@ class SparseAutoencoder(nn.Module):
         sae.fit(activations, num_epochs=100)
         features = sae.encode(activations)
         reconstructed = sae.decode(features)
+        ```
     """
 
     def __init__(

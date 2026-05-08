@@ -289,18 +289,22 @@ class Config(BaseSettings):
             ``WARNING``, ``ERROR``, ``CRITICAL``.
 
     Example:
-        Load from environment variables::
+        Load from environment variables:
 
-            export DRIK_RANDOM_SEED=42
-            export DRIK_AUTOENCODER__HIDDEN_DIM=16384
-            config = Config()
+        ```bash
+        export DRIK_RANDOM_SEED=42
+        export DRIK_AUTOENCODER__HIDDEN_DIM=16384
+        config = Config()
+        ```
 
-        Or construct programmatically::
+        Or construct programmatically:
 
-            config = Config(
-                extractor=ActivationExtractorConfig(...),
-                autoencoder=SparseAutoencoderConfig(activation_dim=2048),
-            )
+        ```python
+        config = Config(
+            extractor=ActivationExtractorConfig(...),
+            autoencoder=SparseAutoencoderConfig(activation_dim=2048),
+        )
+        ```
     """
 
     extractor: ActivationExtractorConfig = Field(
