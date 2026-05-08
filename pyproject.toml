@@ -1,8 +1,12 @@
 [project]
 name = "drrik"
 version = "0.1.0"
-description = "Add your description here"
+description = "A pytorch based framework for extracting interpretable features from the MLP layers of transformer-based Large Language Models using Sparse Autoencoders."
 readme = "README.md"
+authors = [
+    { name = "Shawon Ashraf" },
+]
+license = { file = "LICENSE" }
 requires-python = ">=3.12"
 dependencies = [
     "click>=8.1.0",
@@ -27,6 +31,11 @@ dependencies = [
     "transformers>=5.2.0",
     "wandb>=0.25.0",
 ]
+
+[project.urls]
+"Homepage" = "https://codeberg.org/rashomon/drrik"
+"Repository" = "https://codeberg.org/rashomon/drrik.git"
+"Issues" = "https://codeberg.org/rashomon/drrik/issues"
 
 [project.scripts]
 drrik = "drrik.cli:main"
