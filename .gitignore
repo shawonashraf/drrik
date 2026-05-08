@@ -31,3 +31,6 @@ config.yml
 
 # outputs
 drrik_output/
+
+# macOS
+.DS_Store
