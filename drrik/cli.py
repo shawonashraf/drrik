@@ -211,9 +211,8 @@ def train(
 
     from drrik.models import ActivationExtractor
 
-    extractor = ActivationExtractor()  # Config doesn't matter for loading
-    activations_data, metadata = extractor.load_activations(activations)
-    activations = activations_data["activations"]
+    extractor = ActivationExtractor()
+    activations, metadata = extractor.load_activations(activations)
 
     # Setup wandb
     wandb_config = None
@@ -412,7 +411,8 @@ def run(config: Optional[Path]):
 
     # Get shared settings
     output_dir = Path(cfg.get("output_dir", "./drrik_output"))
-    device = cfg.get("device", None)
+    extraction_device = cfg.get("extraction_device", None)
+    training_device = cfg.get("training_device", None)
     wandb_enabled = cfg.get("wandb_enabled", True)
 
     # Run extract
@@ -420,7 +420,7 @@ def run(config: Optional[Path]):
     extract.callback(
         config=config,
         output_dir=output_dir / "activations",
-        device=device,
+        device=extraction_device,
         wandb=wandb_enabled,
     )
 
@@ -430,7 +430,7 @@ def run(config: Optional[Path]):
         config=config,
         activations=output_dir / "activations" / "activations.pkl",
         output_dir=output_dir / "models",
-        device=device,
+        device=training_device,
         wandb=wandb_enabled,
     )
 
@@ -527,7 +527,8 @@ model_name: "google/gemma-2b"  # HuggingFace model name (<3B for 8GB VRAM)
 # ============================================================================
 # Hardware Configuration
 # ============================================================================
-# device: "auto"                     # Device for training: auto, cuda, cpu
+# extraction_device: "cpu"            # Device for activation extraction: auto, cuda, cpu, mps
+# training_device: "mps"              # Device for SAE training: auto, cuda, cpu, mps
 
 # ============================================================================
 # Output Configuration
