@@ -34,9 +34,9 @@ dependencies = [
 ]
 
 [project.urls]
-"Homepage" = "https://codeberg.org/rashomon/drrik"
-"Repository" = "https://codeberg.org/rashomon/drrik.git"
-"Issues" = "https://codeberg.org/rashomon/drrik/issues"
+"Homepage" = "https://rashomon-gh.github.io/drrik/drrik.html"
+"Repository" = "https://github.com/rashomon-gh/drrik.git"
+"Issues" = "https://github.com/rashomon-gh/drrik/issues"
 
 [project.scripts]
 drrik = "drrik.cli:main"
