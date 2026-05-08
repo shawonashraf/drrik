@@ -256,7 +256,8 @@ WANDB_MODE=online  # or 'offline' to disable
 
 Any HuggingFace transformer model with MLP layers. 
 
-> [!NOTE] **For Apple Silicon users**: Models like gemma-2b have internal weight matrices that exceed MPS kernel limits. Use `device_map: "cpu"` for activation extraction and `training_device: "mps"` for SAE training or, use a smaller batch size and hidden dimension (meaning a smaller expansion factor).
+> [!IMPORTANT]
+>  **For Apple Silicon users**: Models like gemma-2b have internal weight matrices that exceed MPS kernel limits. Use `device_map: "cpu"` for activation extraction and `training_device: "mps"` for SAE training or, use a smaller batch size and hidden dimension (meaning a smaller expansion factor).
 
 ### Supported Datasets
 
