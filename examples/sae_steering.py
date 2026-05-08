@@ -16,13 +16,12 @@ and demonstrates steering with features discovered from the training data.
 Requirements:
     - Pre-trained SAE checkpoint in ``drrik_output/`` (run ``drrik run`` first)
     - GPU recommended (generation is memory-intensive)
-    - HuggingFace token for gated models (set HF_TOKEN env var)
+    - HuggingFace token for gated models (set HUGGINGFACE_HUB_TOKEN in .env)
 
 Usage:
     uv run examples/sae_steering.py
 """
 
-import os
 import warnings
 from pathlib import Path
 
@@ -31,22 +30,21 @@ import torch
 from loguru import logger
 
 from drrik import SAESteering, SparseAutoencoder
+from drrik.settings import get_settings
 
-# Suppress macOS multiprocessing semaphore leak warnings from PyTorch/nnsight
 warnings.filterwarnings(
     "ignore",
     message="resource_tracker: There appear to be .* leaked semaphore objects",
 )
 
-# Default paths matching the drrik_output directory structure
 DEFAULT_SAE_PATH = Path("drrik_output/models/sae_model.pt")
 DEFAULT_ACTIVATIONS_PATH = Path("drrik_output/activations/activations.npy")
 DEFAULT_OUTPUT_DIR = Path("drrik_output/steering_results")
 
-# Model and SAE configuration (matches the trained checkpoint)
 MODEL_NAME = "google/gemma-2b"
 TARGET_LAYER = 0
 STEERING_STRENGTHS = [0.0, 1.0, 2.0, 3.0, 5.0]
+MAX_NEW_TOKENS = 50
 
 
 def load_artifacts(
@@ -61,10 +59,10 @@ def load_artifacts(
         activations_path: Path to the ``.npy`` activations file.
 
     Returns:
-        Tuple of (sae, activations, activations_path).
+        Tuple of (sae, activations).
 
     Raises:
-        FileNotFoundError: If either file is missing.
+        FileNotFoundError: If the SAE checkpoint is missing.
     """
     if not sae_path.exists():
         raise FileNotFoundError(
@@ -96,9 +94,6 @@ def analyze_features(
 ) -> list:
     """
     Analyze feature densities and select interesting features.
-
-    Finds the most active features and returns them sorted by density,
-    suitable for steering demonstrations.
 
     Args:
         sae: The trained SparseAutoencoder.
@@ -139,8 +134,8 @@ def demo_baseline_vs_steered(
     steering: SAESteering,
     prompt: str,
     feature_idx: int,
-    strengths: list = [],
-    max_new_tokens: int = 4096,
+    strengths: list | None = None,
+    max_new_tokens: int = MAX_NEW_TOKENS,
 ) -> dict:
     """
     Compare baseline generation against steered outputs at multiple strengths.
@@ -179,7 +174,7 @@ def demo_multi_feature_steering(
     steering: SAESteering,
     prompt: str,
     features: list,
-    max_new_tokens: int = 4096,
+    max_new_tokens: int = MAX_NEW_TOKENS,
 ) -> str:
     """
     Generate text by combining multiple feature steering directions.
@@ -238,28 +233,23 @@ def main():
 
     logger.info("SAE Activation Steering Demo")
 
-    # Load pre-trained artifacts
     sae, activations = load_artifacts()
 
-    # Analyze features if activations are available
     features = []
     if activations is not None:
         features = analyze_features(sae, activations)
 
-    # Initialize steering controller
-    hf_token = os.environ.get("HF_TOKEN")
+    settings = get_settings()
     steering = SAESteering(
         sae=sae,
         model_name=MODEL_NAME,
         layer=TARGET_LAYER,
-        device_map="mps",
-        token=hf_token,
+        device_map="auto",
+        token=settings.huggingface_hub_token,
     )
 
-    # nnsight loads models lazily on meta — dispatch to load real weights
     steering.model.dispatch()
 
-    # Select features for demo
     if features:
         selected = features[:3]
     else:
@@ -269,7 +259,6 @@ def main():
     for i, f in enumerate(selected):
         logger.info(f"Feature {i + 1}: idx={f['feature_idx']}")
 
-    # Demo 1: Baseline vs steered generation
     logger.info("Demo 1: Baseline vs Steered Generation")
 
     prompts = [
@@ -283,13 +272,12 @@ def main():
         for feat in selected:
             feature_idx = feat["feature_idx"]
             results = demo_baseline_vs_steered(
-                steering, prompt, feature_idx, max_new_tokens=4096
+                steering, prompt, feature_idx, max_new_tokens=MAX_NEW_TOKENS
             )
             logger.info(f"Feature :: {feature_idx}")
             for label, text in results.items():
                 logger.info(f"{label}: {text}")
 
-    # Demo 2: Multi-feature steering
     logger.info("Demo 2: Multi-Feature Steering")
 
     if len(selected) >= 2:
@@ -297,16 +285,14 @@ def main():
         logger.info(f"Prompt: '{prompt}'")
 
         result = demo_multi_feature_steering(
-            steering, prompt, selected, max_new_tokens=4096
+            steering, prompt, selected, max_new_tokens=MAX_NEW_TOKENS
         )
         logger.info(f"Combined result: {result}")
 
-    # Demo 3: Steering direction analysis
     logger.info("Demo 3: Steering Direction Analysis")
 
     demo_steering_directions(steering, selected)
 
-    # Save analysis
     logger.info("Saving results...")
 
     DEFAULT_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)

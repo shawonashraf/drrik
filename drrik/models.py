@@ -24,7 +24,7 @@ from typing import Optional, Tuple, Union, Dict, Any
 from pathlib import Path
 import pickle
 
-import re
+from drrik.steering import resolve_module_path
 
 import torch
 import numpy as np
@@ -283,14 +283,7 @@ class ActivationExtractor:
             The resolved nnsight module object corresponding to the
             given path.
         """
-        obj = self.model
-        for part in re.split(r"\.", path):
-            match = re.match(r"(\w+)\[(\d+)\]", part)
-            if match:
-                obj = getattr(obj, match.group(1))[int(match.group(2))]
-            else:
-                obj = getattr(obj, part)
-        return obj
+        return resolve_module_path(self.model, path)
 
     def extract(
         self,

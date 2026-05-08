@@ -30,25 +30,78 @@ Example:
         "The weather is",
         feature_idx=42,
         strength=3.0,
-        num_steps=20,
+        max_new_tokens=20,
     )
     ```
 """
 
-from typing import Optional, List, Dict, Any, Union
-from pathlib import Path
 import re
+from datetime import datetime
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Union
 
+import numpy as np
 import torch
 import torch.nn.functional as F
-import numpy as np
+from loguru import logger
+from nnsight import LanguageModel
 from tqdm import tqdm
 from transformers import AutoTokenizer
-from nnsight import LanguageModel
-
-from loguru import logger
 
 from drrik.autoencoder import SparseAutoencoder
+from drrik.settings import get_settings
+
+
+def resolve_module_path(model, path: str):
+    """Resolve a dotted/bracket path to the actual nnsight module.
+
+    Parses a path string like ``model.layers[0].mlp`` by splitting on
+    dots, handling both attribute access and integer indexing.
+
+    Args:
+        model: The root model object (e.g. nnsight LanguageModel).
+        path: A dot-separated module path with optional bracket
+            indexing, e.g. ``model.layers[2].mlp``.
+
+    Returns:
+        The resolved module object.
+    """
+    obj = model
+    for part in re.split(r"\.", path):
+        match = re.match(r"(\w+)\[(\d+)\]", part)
+        if match:
+            obj = getattr(obj, match.group(1))[int(match.group(2))]
+        else:
+            obj = getattr(obj, part)
+    return obj
+
+
+def _sample_next_token(
+    logits: torch.Tensor, temperature: float, top_p: float
+) -> torch.Tensor:
+    """Apply temperature, top-p filtering, and sample a single token.
+
+    Args:
+        logits: Raw logits of shape ``(1, vocab_size)``.
+        temperature: Sampling temperature.
+        top_p: Nucleus sampling threshold.
+
+    Returns:
+        Sampled token tensor of shape ``(1, 1)``.
+    """
+    logits = logits / temperature
+
+    sorted_logits, sorted_indices = torch.sort(logits, descending=True)
+    cumulative_probs = torch.cumsum(F.softmax(sorted_logits, dim=-1), dim=-1)
+    sorted_indices_to_remove = cumulative_probs > top_p
+    sorted_indices_to_remove[..., 1:] = sorted_indices_to_remove[..., :-1].clone()
+    sorted_indices_to_remove[..., 0] = 0
+    indices_to_remove = sorted_indices_to_remove.scatter(
+        1, sorted_indices, sorted_indices_to_remove
+    )
+    logits[indices_to_remove] = float("-inf")
+
+    return torch.multinomial(F.softmax(logits, dim=-1), num_samples=1)
 
 
 class SAESteering:
@@ -104,6 +157,9 @@ class SAESteering:
         """
         Initialize the SAE steering controller.
 
+        If ``token`` is not provided, it is read from the environment via
+        ``get_settings()`` (i.e. ``HUGGINGFACE_HUB_TOKEN`` in ``.env``).
+
         Args:
             sae: A trained SparseAutoencoder whose decoder weights provide
                  steering directions.
@@ -115,8 +171,13 @@ class SAESteering:
             torch_dtype: Weight dtype for model loading.
             device_map: Device mapping strategy.
             trust_remote_code: Whether to trust remote code from the repo.
-            token: HuggingFace token for gated models.
+            token: HuggingFace token for gated models. Falls back to
+                   ``HUGGINGFACE_HUB_TOKEN`` from ``.env`` when ``None``.
         """
+        if token is None:
+            settings = get_settings()
+            token = settings.huggingface_hub_token
+
         self.sae = sae
         self.target_layer = layer
         self.device = next(sae.parameters()).device
@@ -152,147 +213,23 @@ class SAESteering:
 
         logger.info(f"Model loaded on {self.model.device}")
 
-    def _get_mlp_output(
-        self,
-        layer_output,
-    ) -> torch.Tensor:
-        """
-        Extract the MLP output tensor from a layer's trace object.
-
-        For most architectures (Gemma, Llama), the MLP output is the direct
-        output of the MLP module. This method handles the nnsight proxy
-        tensor returned during tracing.
+    def _tokenize(self, text: str) -> tuple[torch.Tensor, Optional[torch.Tensor]]:
+        """Tokenize text and move tensors to the model device.
 
         Args:
-            layer_output: The nnsight proxy tensor for the MLP output.
+            text: Raw prompt string.
 
         Returns:
-            The MLP activation tensor.
+            Tuple of (input_ids, attention_mask) on the model device.
         """
-        return layer_output
-
-    def steer_generation(
-        self,
-        text: str,
-        feature_idx: int,
-        strength: float = 1.0,
-        max_new_tokens: int = 50,
-        temperature: float = 0.8,
-        top_p: float = 0.9,
-        attention_mask: Optional[torch.Tensor] = None,
-    ) -> str:
-        """
-        Generate text with SAE feature steering applied.
-
-        During generation, at each step the MLP activations at the target
-        layer are modified by adding ``strength * decoder_weight[:, feature_idx]``.
-        This biases the model's next-token distribution toward outputs
-        associated with the given feature.
-
-        The steering is applied using nnsight's tracing mechanism to
-        intercept and modify the MLP output before it passes to the
-        residual stream.
-
-        Args:
-            text: The prompt text to generate from.
-            feature_idx: Index of the SAE feature to use for steering.
-            strength: Magnitude of steering. Higher values produce stronger
-                     bias. Typical range: 0.0 to 5.0.
-            max_new_tokens: Maximum number of tokens to generate.
-            temperature: Sampling temperature for generation.
-            top_p: Nucleus sampling threshold.
-            attention_mask: Optional attention mask from tokenization.
-
-        Returns:
-            The generated text string.
-
-        Raises:
-            ValueError: If ``feature_idx`` is out of range for the SAE.
-        """
-        if feature_idx < 0 or feature_idx >= self.sae.hidden_dim:
-            raise ValueError(
-                f"feature_idx {feature_idx} out of range [0, {self.sae.hidden_dim})"
-            )
-
-        # Get the steering direction from the SAE decoder weights
-        # Shape: (activation_dim,)
-        steering_direction = self.sae.decoder.weight[:, feature_idx]
-
-        # Tokenize the prompt
         inputs = self.tokenizer(
             text, return_tensors="pt", padding=True, truncation=True
         )
         input_ids = inputs["input_ids"].to(self.model.device)
-        if attention_mask is None:
-            attention_mask = inputs.get("attention_mask", None)
-            if attention_mask is not None:
-                attention_mask = attention_mask.to(self.model.device)
-
-        # Get the steering direction on the model's device
-        steering_direction = steering_direction.to(self.model.device)
-
-        with torch.no_grad():
-            current_ids = input_ids
-            current_mask = attention_mask
-
-            for step in tqdm(range(max_new_tokens), desc="Steering generation"):
-                # Check if we've generated enough tokens
-                if current_ids.shape[-1] >= self.tokenizer.model_max_length:
-                    break
-
-                # Use nnsight to trace through the model and intercept MLP output
-                with self.model.trace(current_ids, attention_mask=current_mask):
-                    # Navigate to the target layer's MLP module
-                    module = self.model
-                    for part in re.split(
-                        r"\.", f"model.layers[{self.target_layer}].mlp"
-                    ):
-                        match = re.match(r"(\w+)\[(\d+)\]", part)
-                        if match:
-                            module = getattr(module, match.group(1))[
-                                int(match.group(2))
-                            ]
-                        else:
-                            module = getattr(module, part)
-
-                    # Save the MLP output for intervention
-                    mlp_output = module.output.save()
-
-                # Get the actual MLP activations
-                mlp_acts = mlp_output
-
-                # Apply steering: add scaled feature direction
-                # The steering direction is added to the MLP output
-                # Shape: (batch, seq_len, hidden_dim) + (hidden_dim,)
-                if mlp_acts.dim() == 3:
-                    mlp_acts[:, :, :] = (
-                        mlp_acts[:, :, :] + strength * steering_direction
-                    )
-                elif mlp_acts.dim() == 2:
-                    mlp_acts[:] = mlp_acts[:] + strength * steering_direction
-
-                # Get the next token logits from the model's LM head
-                # We need to re-run with the modified activations
-                # Since nnsight doesn't support in-place modification of proxy tensors
-                # directly, we use a different approach: modify the module's forward
-
-                break  # Exit the trace loop
-
-            # Since nnsight's proxy tensors can't be modified in-place during trace,
-            # we use a hook-based approach instead
-
-        # Use hook-based intervention for proper steering
-        result = self._generate_with_hooks(
-            input_ids,
-            attention_mask,
-            steering_direction,
-            strength,
-            max_new_tokens,
-            temperature,
-            top_p,
-        )
-
-        return result
+        attention_mask = inputs.get("attention_mask", None)
+        if attention_mask is not None:
+            attention_mask = attention_mask.to(self.model.device)
+        return input_ids, attention_mask
 
     def _generate_with_hooks(
         self,
@@ -308,8 +245,7 @@ class SAESteering:
         Generate text using forward-hook-based MLP intervention.
 
         Registers a forward hook on the target layer's MLP module to
-        modify activations during each forward pass. This is the
-        recommended approach for steering with nnsight.
+        modify activations during each forward pass.
 
         Args:
             input_ids: Tokenized input tensor.
@@ -325,24 +261,14 @@ class SAESteering:
         """
         generated_tokens = input_ids.clone()
         steering_direction = steering_direction.to(generated_tokens.device)
-
-        target_module = None
+        target_module = resolve_module_path(
+            self.model, f"model.layers[{self.target_layer}].mlp"
+        )
         hook_handle = None
 
         try:
-            # Navigate to the target layer's MLP
-            target_module = self.model
-            for part in re.split(r"\.", f"model.layers[{self.target_layer}].mlp"):
-                match = re.match(r"(\w+)\[(\d+)\]", part)
-                if match:
-                    target_module = getattr(target_module, match.group(1))[
-                        int(match.group(2))
-                    ]
-                else:
-                    target_module = getattr(target_module, part)
 
             def steering_hook(module, input_args, output):
-                """Forward hook that adds steering direction to MLP output."""
                 if isinstance(output, torch.Tensor):
                     output = output + strength * steering_direction
                 elif isinstance(output, tuple):
@@ -354,56 +280,27 @@ class SAESteering:
                     )
                 return output
 
-            # Register the hook
             hook_handle = target_module.register_forward_hook(steering_hook)
 
-            # Generate token by token using the underlying transformers model
-            # nnsight's LanguageModel wraps a transformers model
             base_model = self.model._module
             device = generated_tokens.device
 
-            for step in tqdm(range(max_new_tokens), desc="Steering generation"):
-                # Forward pass
+            for _ in tqdm(range(max_new_tokens), desc="Steering generation"):
+                if generated_tokens.shape[-1] >= self.tokenizer.model_max_length:
+                    break
+
                 outputs = base_model(
                     input_ids=generated_tokens,
-                    attention_mask=attention_mask
-                    if attention_mask is not None
-                    else None,
+                    attention_mask=attention_mask,
                     use_cache=True,
                 )
 
-                # Get logits for the last position
                 logits = outputs.logits[:, -1, :]
+                next_token = _sample_next_token(logits, temperature, top_p)
 
-                # Apply temperature
-                logits = logits / temperature
-
-                # Apply top-p sampling
-                sorted_logits, sorted_indices = torch.sort(logits, descending=True)
-                cumulative_probs = torch.cumsum(
-                    F.softmax(sorted_logits, dim=-1), dim=-1
-                )
-                # Remove tokens below cumulative probability threshold
-                sorted_indices_to_remove = cumulative_probs > top_p
-                # Shift indices left by 1 to mark the threshold token
-                sorted_indices_to_remove[..., 1:] = sorted_indices_to_remove[
-                    ..., :-1
-                ].clone()
-                sorted_indices_to_remove[..., 0] = 0
-                # Index into sorted_indices to get the actual indices to remove
-                indices_to_remove = sorted_indices_to_remove.scatter(
-                    1, sorted_indices, sorted_indices_to_remove
-                )
-                logits[indices_to_remove] = float("-inf")
-
-                # Sample next token
-                next_token = torch.multinomial(F.softmax(logits, dim=-1), num_samples=1)
-
-                # Check for EOS token
                 if next_token.item() == self.tokenizer.eos_token_id:
                     break
 
-                # Append token (next_token is already (1, 1) from multinomial on 2D logits)
                 generated_tokens = torch.cat([generated_tokens, next_token], dim=-1)
                 if attention_mask is not None:
                     attention_mask = torch.cat(
@@ -411,16 +308,10 @@ class SAESteering:
                     )
 
         finally:
-            # Clean up hook
             if hook_handle is not None:
                 hook_handle.remove()
 
-        # Decode the generated tokens
-        generated_text = self.tokenizer.decode(
-            generated_tokens[0], skip_special_tokens=True
-        )
-
-        return generated_text
+        return self.tokenizer.decode(generated_tokens[0], skip_special_tokens=True)
 
     def generate(
         self,
@@ -463,11 +354,9 @@ class SAESteering:
                        is provided for steered generation, or if the lists
                        have mismatched lengths.
         """
-        # If no steering requested, do baseline generation
         if feature_idx is None and feature_indices is None:
             return self._generate_baseline(text, max_new_tokens, temperature, top_p)
 
-        # Handle single feature
         if feature_idx is not None:
             feature_indices = [feature_idx]
             strengths = [strength]
@@ -477,7 +366,6 @@ class SAESteering:
         if len(feature_indices) != len(strengths):
             raise ValueError("feature_indices and strengths must have the same length")
 
-        # Compute combined steering direction
         combined_direction = torch.zeros(self.sae.activation_dim, device=self.device)
         for fid, s in zip(feature_indices, strengths):
             if fid < 0 or fid >= self.sae.hidden_dim:
@@ -486,20 +374,13 @@ class SAESteering:
                 )
             combined_direction += s * self.sae.decoder.weight[:, fid]
 
+        input_ids, attention_mask = self._tokenize(text)
+
         return self._generate_with_hooks(
-            self.tokenizer(text, return_tensors="pt", padding=True, truncation=True)[
-                "input_ids"
-            ].to(self.model.device),
-            self.tokenizer(text, return_tensors="pt", padding=True, truncation=True)
-            .get("attention_mask", None)
-            .to(self.model.device)
-            if self.tokenizer(
-                text, return_tensors="pt", padding=True, truncation=True
-            ).get("attention_mask", None)
-            is not None
-            else None,
+            input_ids,
+            attention_mask,
             combined_direction,
-            1.0,  # strength is already baked into combined_direction
+            1.0,
             max_new_tokens,
             temperature,
             top_p,
@@ -524,19 +405,13 @@ class SAESteering:
         Returns:
             The generated text string.
         """
-        inputs = self.tokenizer(
-            text, return_tensors="pt", padding=True, truncation=True
-        )
-        input_ids = inputs["input_ids"].to(self.model.device)
-        attention_mask = inputs.get("attention_mask", None)
-        if attention_mask is not None:
-            attention_mask = attention_mask.to(self.model.device)
+        input_ids, attention_mask = self._tokenize(text)
 
         base_model = self.model._module
         generated_tokens = input_ids.clone()
 
         with torch.no_grad():
-            for step in tqdm(range(max_new_tokens), desc="Baseline generation"):
+            for _ in tqdm(range(max_new_tokens), desc="Baseline generation"):
                 if generated_tokens.shape[-1] >= self.tokenizer.model_max_length:
                     break
 
@@ -547,23 +422,7 @@ class SAESteering:
                 )
 
                 logits = outputs.logits[:, -1, :]
-                logits = logits / temperature
-
-                sorted_logits, sorted_indices = torch.sort(logits, descending=True)
-                cumulative_probs = torch.cumsum(
-                    F.softmax(sorted_logits, dim=-1), dim=-1
-                )
-                sorted_indices_to_remove = cumulative_probs > top_p
-                sorted_indices_to_remove[..., 1:] = sorted_indices_to_remove[
-                    ..., :-1
-                ].clone()
-                sorted_indices_to_remove[..., 0] = 0
-                indices_to_remove = sorted_indices_to_remove.scatter(
-                    1, sorted_indices, sorted_indices_to_remove
-                )
-                logits[indices_to_remove] = float("-inf")
-
-                next_token = torch.multinomial(F.softmax(logits, dim=-1), num_samples=1)
+                next_token = _sample_next_token(logits, temperature, top_p)
 
                 if next_token.item() == self.tokenizer.eos_token_id:
                     break
@@ -584,7 +443,7 @@ class SAESteering:
         self,
         text: str,
         feature_idx: int,
-        strengths: List[float] = None,
+        strengths: Optional[List[float]] = None,
         max_new_tokens: int = 50,
         temperature: float = 0.8,
         top_p: float = 0.9,
@@ -638,7 +497,6 @@ class SAESteering:
         activations: np.ndarray,
         top_k: int = 20,
         min_activation: float = 0.0,
-        max_new_tokens: int = 30,
     ) -> List[Dict[str, Any]]:
         """
         Find the top-k SAE features that most activate on given text.
@@ -652,7 +510,6 @@ class SAESteering:
             activations: MLP activations array of shape ``(n_samples, activation_dim)``.
             top_k: Number of top features to return.
             min_activation: Minimum activation threshold to consider.
-            max_new_tokens: Max tokens for any generation during analysis.
 
         Returns:
             List of dicts, each containing:
@@ -672,17 +529,12 @@ class SAESteering:
 
             features = self.sae.encode(acts_tensor)
 
-            # Average activation across samples
             avg_activations = features.mean(dim=0).cpu().numpy()
-
-            # Get decoder weight norms
             decoder_norms = self.sae.decoder.weight.norm(dim=0).cpu().numpy()
 
-            # Filter by minimum activation
             active_mask = avg_activations >= min_activation
             active_indices = np.where(active_mask)[0]
 
-            # Sort by activation value
             sorted_indices = active_indices[
                 np.argsort(avg_activations[active_indices])[::-1]
             ][:top_k]
@@ -745,6 +597,7 @@ class SAESteering:
         results: Dict[str, str],
         output_dir: Union[str, Path],
         prompt: str = "",
+        feature_label: str = "",
     ) -> Path:
         """
         Save steering comparison results to disk.
@@ -756,6 +609,8 @@ class SAESteering:
             results: Dictionary mapping labels to generated text.
             output_dir: Directory to save the analysis file.
             prompt: The original prompt text.
+            feature_label: Optional label for the feature, included in
+                the filename to prevent overwriting across runs.
 
         Returns:
             Path to the saved analysis file.
@@ -763,7 +618,9 @@ class SAESteering:
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
 
-        filepath = output_dir / "steering_analysis.txt"
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        suffix = f"_{feature_label}" if feature_label else ""
+        filepath = output_dir / f"steering_analysis{suffix}_{timestamp}.txt"
 
         with open(filepath, "w") as f:
             f.write(f"Prompt: {prompt}\n")
