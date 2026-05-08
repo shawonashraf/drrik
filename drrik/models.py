@@ -1,3 +1,5 @@
+# type: ignore
+
 """
 Model and activation extraction module using nnsight.
 
