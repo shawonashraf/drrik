@@ -306,6 +306,7 @@ class SparseAutoencoder(nn.Module):
         """
         # Setup wandb if enabled
         wandb_logger = None
+        _owns_wandb = False
         if wandb_enabled:
             if wandb_config is None:
                 wandb_logger = WandbConfig(
@@ -319,11 +320,14 @@ class SparseAutoencoder(nn.Module):
                         "num_epochs": num_epochs,
                     }
                 )
+                wandb_logger.initialize()
+                _owns_wandb = True
+            elif not wandb_config._initialized:
+                wandb_logger = wandb_config
+                wandb_logger.initialize()
+                _owns_wandb = True
             else:
                 wandb_logger = wandb_config
-
-            if wandb_logger:
-                wandb_logger.initialize()
 
         # Determine device
         if device is None:
@@ -499,8 +503,9 @@ class SparseAutoencoder(nn.Module):
 
             logger.info(f"wandb run URL: {wandb_logger.get_run_url()}")
 
-            # Finalize wandb (close the run)
-            wandb_logger.finalize()
+            # Finalize wandb (close the run) only if we created it
+            if _owns_wandb:
+                wandb_logger.finalize()
 
         logger.info("Training complete!")
         return self
@@ -516,9 +521,12 @@ class SparseAutoencoder(nn.Module):
             Array of feature densities of shape (hidden_dim,)
         """
         self.eval()
+        device = next(self.parameters()).device
         with torch.no_grad():
             if isinstance(activations, np.ndarray):
-                activations = torch.from_numpy(activations).float()
+                activations = torch.from_numpy(activations).float().to(device)
+            else:
+                activations = activations.to(device)
 
             features = self.encode(activations)
             density = (features > 0).float().mean(dim=0).cpu().numpy()
@@ -543,9 +551,12 @@ class SparseAutoencoder(nn.Module):
             Tuple of (top activations values, top indices)
         """
         self.eval()
+        device = next(self.parameters()).device
         with torch.no_grad():
             if isinstance(activations, np.ndarray):
-                activations = torch.from_numpy(activations).float()
+                activations = torch.from_numpy(activations).float().to(device)
+            else:
+                activations = activations.to(device)
 
             features = self.encode(activations)
             feature_activations = features[:, feature_idx].cpu().numpy()
