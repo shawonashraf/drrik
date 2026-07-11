@@ -15,7 +15,6 @@ def test_settings_creation():
 
     env_settings = EnvironmentSettings()
     assert env_settings.wandb_project == "drrik-experiments"
-    assert env_settings.wandb_mode == "online"
 
     wandb_cfg = WandbConfig(
         project="test-project",

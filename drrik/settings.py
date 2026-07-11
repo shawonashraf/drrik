@@ -40,15 +40,12 @@ class EnvironmentSettings(BaseSettings):
         HUGGINGFACE_HUB_TOKEN=hf_...
         WANDB_API_KEY=...
         WANDB_PROJECT=drrik-experiments
-        WANDB_ENTITY=your-username
         ```
 
     Attributes:
         huggingface_hub_token: HuggingFace Hub API token for gated models
         wandb_api_key: Weights & Biases API key for experiment tracking
         wandb_project: Default wandb project name
-        wandb_entity: Default wandb entity (username or team)
-        wandb_mode: wandb mode ('online', 'offline', or 'disabled')
     """
 
     model_config = SettingsConfigDict(
@@ -74,37 +71,6 @@ class EnvironmentSettings(BaseSettings):
     wandb_project: str = Field(
         default="drrik-experiments", description="Default wandb project name"
     )
-
-    wandb_entity: Optional[str] = Field(
-        default=None, description="Default wandb entity (username or team name)"
-    )
-
-    wandb_mode: str = Field(
-        default="online",
-        description="wandb mode: 'online' to sync, 'offline' to save locally, "
-        "'disabled' to disable wandb",
-    )
-
-    @field_validator("wandb_mode")
-    @classmethod
-    def validate_wandb_mode(cls, v: str) -> str:
-        """Validate that the wandb mode is one of the allowed values.
-
-        Args:
-            v: The wandb mode string to validate.
-
-        Returns:
-            The lowercased wandb mode string.
-
-        Raises:
-            ValueError: If the mode is not ``online``, ``offline``,
-                or ``disabled``.
-        """
-        valid_modes = ["online", "offline", "disabled"]
-        v = v.lower()
-        if v not in valid_modes:
-            raise ValueError(f"wandb_mode must be one of {valid_modes}, got '{v}'")
-        return v
 
     @field_validator("huggingface_hub_token")
     @classmethod
@@ -138,13 +104,12 @@ class EnvironmentSettings(BaseSettings):
 
     @property
     def use_wandb(self) -> bool:
-        """Check if wandb should be enabled based on API key and mode.
+        """Check if wandb should be enabled based on API key.
 
         Returns:
-            ``True`` if an API key is set and wandb mode is not
-            ``disabled``, ``False`` otherwise.
+            ``True`` if an API key is set, ``False`` otherwise.
         """
-        return self.wandb_api_key is not None and self.wandb_mode != "disabled"
+        return self.wandb_api_key is not None
 
     @property
     def has_hf_token(self) -> bool:
@@ -200,7 +165,6 @@ class WandbConfig:
     def __init__(
         self,
         project: Optional[str] = None,
-        entity: Optional[str] = None,
         name: Optional[str] = None,
         config: Optional[dict] = None,
         tags: Optional[list[str]] = None,
@@ -212,7 +176,6 @@ class WandbConfig:
 
         Args:
             project: wandb project name (uses settings default if None)
-            entity: wandb entity (uses settings default if None)
             name: Run name (auto-generated if None)
             config: Configuration dict to log
             tags: List of tags for the run
@@ -230,7 +193,6 @@ class WandbConfig:
             self.enabled = False
 
         self.project = project or self.settings.wandb_project
-        self.entity = entity or self.settings.wandb_entity
         self.name = name
         self.config = config or {}
         self.tags = tags
@@ -258,12 +220,10 @@ class WandbConfig:
 
             # Set API key
             os.environ["WANDB_API_KEY"] = self.settings.wandb_api_key
-            os.environ["WANDB_MODE"] = self.settings.wandb_mode
 
             # Initialize run
             self._run = wandb.init(
                 project=self.project,
-                entity=self.entity,
                 name=self.name,
                 config=self.config,
                 tags=self.tags,

@@ -244,10 +244,8 @@ HUGGINGFACE_HUB_TOKEN=your_token_here
 # Weights & Biases API key (optional, for experiment tracking)
 WANDB_API_KEY=your_wandb_key_here
 
-# Wandb settings
+# Wandb project
 WANDB_PROJECT=drrik-experiments
-WANDB_ENTITY=your_username
-WANDB_MODE=online  # or 'offline' to disable
 ```
 
 ## Key Features
