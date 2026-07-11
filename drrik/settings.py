@@ -4,42 +4,46 @@ Settings and environment configuration for the Drrik framework.
 This module manages:
 - HuggingFace Hub API tokens for gated models
 - Weights & Biases (wandb) API keys for experiment tracking
-- Other environment-based configuration
+- Other configuration values
 
 The module provides two main classes:
 
-- ``EnvironmentSettings``: A Pydantic settings model that loads API keys
-  and configuration from environment variables or a ``.env`` file.
+- ``EnvironmentSettings``: A Pydantic model that loads API keys and
+  configuration from a ``settings.yml`` file (falling back to environment
+  variables for individual overrides).
 - ``WandbConfig``: A context manager for wandb experiment tracking that
   handles initialization, metric logging, artifact storage, and cleanup.
 
 Global State:
     A singleton ``EnvironmentSettings`` instance is maintained via
     ``get_settings()`` and can be reloaded with ``reload_settings()``
-    when environment variables change.
+    when the config file or environment variables change.
 """
 
 import os
+from pathlib import Path
 from typing import Optional
 
-from pydantic import Field, field_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
-
+import yaml
+from pydantic import BaseModel, Field
 from loguru import logger
 
+DEFAULT_CONFIG_PATH = "settings.yml"
 
-class EnvironmentSettings(BaseSettings):
+
+class EnvironmentSettings(BaseModel):
     """
     Environment settings for API keys and tokens.
 
-    These settings are loaded from environment variables or a .env file.
-    Create a .env file in the project root with your credentials.
+    Loads from a YAML config file (default ``settings.yml`` in the
+    project root).  Environment variables override file values when
+    set (``HUGGINGFACE_HUB_TOKEN``, ``WANDB_API_KEY``, ``WANDB_PROJECT``).
 
-    Example .env file:
-        ```bash
-        HUGGINGFACE_HUB_TOKEN=hf_...
-        WANDB_API_KEY=...
-        WANDB_PROJECT=drrik-experiments
+    Example settings.yml:
+        ```yaml
+        huggingface_hub_token: hf_...
+        wandb_api_key: ...
+        wandb_project: drrik-experiments
         ```
 
     Attributes:
@@ -47,14 +51,6 @@ class EnvironmentSettings(BaseSettings):
         wandb_api_key: Weights & Biases API key for experiment tracking
         wandb_project: Default wandb project name
     """
-
-    model_config = SettingsConfigDict(
-        env_file=".env",
-        env_file_encoding="utf-8",
-        env_prefix="",
-        case_sensitive=False,
-        extra="ignore",
-    )
 
     huggingface_hub_token: Optional[str] = Field(
         default=None,
@@ -72,35 +68,42 @@ class EnvironmentSettings(BaseSettings):
         default="drrik-experiments", description="Default wandb project name"
     )
 
-    @field_validator("huggingface_hub_token")
     @classmethod
-    def validate_hf_token(cls, v: Optional[str]) -> Optional[str]:
-        """Log a confirmation message when an HF token is provided.
+    def from_yaml(cls, path: str | Path = DEFAULT_CONFIG_PATH) -> "EnvironmentSettings":
+        """Load settings from a YAML file, with env var overrides.
 
         Args:
-            v: The HuggingFace Hub token string, or ``None``.
+            path: Path to the YAML config file.  If the file does not
+                exist, falls back to environment variables only.
 
         Returns:
-            The unmodified token string.
+            An ``EnvironmentSettings`` instance populated from the file
+            and/or environment variables.
         """
-        if v:
+        data: dict = {}
+        p = Path(path)
+        if p.exists():
+            with open(p) as f:
+                data = yaml.safe_load(f) or {}
+
+        # Environment variables override file values
+        for env_key, field_name in [
+            ("HUGGINGFACE_HUB_TOKEN", "huggingface_hub_token"),
+            ("WANDB_API_KEY", "wandb_api_key"),
+            ("WANDB_PROJECT", "wandb_project"),
+        ]:
+            val = os.environ.get(env_key)
+            if val is not None:
+                data[field_name] = val
+
+        instance = cls(**{k: v for k, v in data.items() if k in cls.model_fields})
+
+        if instance.huggingface_hub_token:
             logger.info("HuggingFace Hub token is configured")
-        return v
-
-    @field_validator("wandb_api_key")
-    @classmethod
-    def validate_wandb_key(cls, v: Optional[str]) -> Optional[str]:
-        """Log a confirmation message when a wandb API key is provided.
-
-        Args:
-            v: The Weights & Biases API key string, or ``None``.
-
-        Returns:
-            The unmodified API key string.
-        """
-        if v:
+        if instance.wandb_api_key:
             logger.info("Weights & Biases API key is configured")
-        return v
+
+        return instance
 
     @property
     def use_wandb(self) -> bool:
@@ -182,7 +185,7 @@ class WandbConfig:
             settings: EnvironmentSettings instance (uses global if None)
             enabled: If False, disables wandb even if configured
         """
-        self.settings = settings or EnvironmentSettings()
+        self.settings = settings or EnvironmentSettings.from_yaml()
         self.enabled = enabled and self.settings.use_wandb
 
         if self.enabled and not self.settings.wandb_api_key:
@@ -419,20 +422,20 @@ def get_settings() -> EnvironmentSettings:
     """
     global _global_settings
     if _global_settings is None:
-        _global_settings = EnvironmentSettings()
+        _global_settings = EnvironmentSettings.from_yaml()
     return _global_settings
 
 
 def reload_settings() -> EnvironmentSettings:
-    """Reload settings from environment variables and the ``.env`` file.
+    """Reload settings from the YAML config file and environment variables.
 
     Discards the cached global ``EnvironmentSettings`` singleton and
-    creates a fresh instance, picking up any changes to environment
-    variables or the ``.env`` file since the last load.
+    creates a fresh instance from ``settings.yml``, picking up any
+    changes to the file or environment variables since the last load.
 
     Returns:
         The newly created ``EnvironmentSettings`` instance.
     """
     global _global_settings
-    _global_settings = EnvironmentSettings()
+    _global_settings = EnvironmentSettings.from_yaml()
     return _global_settings

@@ -13,7 +13,7 @@ def test_settings_creation():
     """Test that settings can be created."""
     from drrik.settings import EnvironmentSettings, WandbConfig
 
-    env_settings = EnvironmentSettings()
+    env_settings = EnvironmentSettings.from_yaml()
     assert env_settings.wandb_project == "drrik-experiments"
 
     wandb_cfg = WandbConfig(
@@ -28,7 +28,7 @@ def test_environment_settings_properties():
     """Test EnvironmentSettings properties."""
     from drrik.settings import EnvironmentSettings
 
-    settings = EnvironmentSettings()
+    settings = EnvironmentSettings.from_yaml()
     # These should work without error
     assert isinstance(settings.use_wandb, bool)
     assert isinstance(settings.has_hf_token, bool)

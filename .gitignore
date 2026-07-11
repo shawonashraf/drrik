@@ -10,9 +10,10 @@ wheels/
 .venv
 venv/
 
-# Environment variables
+# Environment / config
 .env
 .env.local
+settings.yml
 
 # editors
 .vscode/

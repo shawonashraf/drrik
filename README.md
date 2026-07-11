@@ -233,20 +233,22 @@ sae_config = SparseAutoencoderConfig(
 )
 ```
 
-## Environment Variables
+## Configuration
 
-For API keys and optional settings, create a `.env` file (see `.env.example`):
+API keys are loaded from a `settings.yml` file (see `settings.example.yml`). Copy and fill in your credentials:
 
 ```bash
-# HuggingFace Hub token (for gated models)
-HUGGINGFACE_HUB_TOKEN=your_token_here
-
-# Weights & Biases API key (optional, for experiment tracking)
-WANDB_API_KEY=your_wandb_key_here
-
-# Wandb project
-WANDB_PROJECT=drrik-experiments
+cp settings.example.yml settings.yml
 ```
+
+```yaml
+# settings.yml
+huggingface_hub_token: hf_your_token_here
+wandb_api_key: your_wandb_key_here
+wandb_project: drrik-experiments
+```
+
+Environment variables (`HUGGINGFACE_HUB_TOKEN`, `WANDB_API_KEY`, `WANDB_PROJECT`) override the file when set.
 
 ## Key Features
 

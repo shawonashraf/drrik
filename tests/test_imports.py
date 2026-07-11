@@ -134,7 +134,7 @@ def test_environment_settings_creation():
     """Test that EnvironmentSettings can be created."""
     from drrik.settings import EnvironmentSettings
 
-    settings = EnvironmentSettings()
+    settings = EnvironmentSettings.from_yaml()
     assert settings.wandb_project == "drrik-experiments"
 
 
@@ -155,7 +155,7 @@ def test_settings_properties():
     """Test EnvironmentSettings properties."""
     from drrik.settings import EnvironmentSettings
 
-    settings = EnvironmentSettings()
+    settings = EnvironmentSettings.from_yaml()
     # These should work without error
     assert hasattr(settings, "use_wandb")
     assert hasattr(settings, "has_hf_token")

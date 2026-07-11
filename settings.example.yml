@@ -1,0 +1,15 @@
+# Drrik Framework Configuration
+#
+# Copy this file to settings.yml and fill in your API keys.
+# The settings.yml file is git-ignored to protect your credentials.
+
+# HuggingFace Hub API token (for gated models like Llama, Mistral, etc.)
+# Get your token at: https://huggingface.co/settings/tokens
+huggingface_hub_token: hf_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+
+# Weights & Biases API key (optional, for experiment tracking)
+# Get your key at: https://wandb.ai/settings
+wandb_api_key: your_wandb_api_key_here
+
+# Default wandb project name
+wandb_project: drrik-experiments
