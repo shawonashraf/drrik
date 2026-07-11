@@ -418,6 +418,9 @@ features = steering.find_steering_features("text", activations, top_k=20)
 # Get raw steering direction vector
 direction = steering.get_steering_direction(42, normalize=True)
 
+# Build token-to-feature mapping
+token_map = steering.build_token_feature_map(tokens=[10, 20, 30])
+
 # Save comparison results
 steering.save_steering_analysis(results, "./output", prompt="The sky is")
 ```
