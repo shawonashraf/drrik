@@ -647,6 +647,151 @@ class SAESteering:
         logger.info(f"Found {len(results)} active features for text: {text[:100]}")
         return results
 
+    def build_token_feature_map(
+        self,
+        tokens: Optional[List[int]] = None,
+        top_k_features: int = 10,
+        min_activation: float = 1e-3,
+        batch_size: int = 64,
+    ) -> Dict[int, Dict[str, Any]]:
+        """
+        Build a token-to-feature activation map.
+
+        For each input token (or batch of tokens), this method passes it
+        through the model at the target layer to capture MLP activations,
+        then encodes those activations through the SAE encoder to determine
+        which features are activated by each token.  The result is a
+        dictionary mapping token IDs to their active SAE features and
+        mean activation magnitudes.
+
+        This provides a lookup table for understanding what semantic
+        content each token is associated with in terms of learned SAE
+        features — useful for interpreting which features respond to
+        specific tokens without having to steer by them during generation.
+
+        Args:
+            tokens: List of token IDs to evaluate.  If ``None``, evaluates
+                the first N tokens from the tokenizer's vocabulary
+                (default ``min(1024, len(tokenizer) - num_special_tokens)``).
+                Special/padding tokens are skipped.
+            top_k_features: Maximum number of features per token to report
+                when there are more than this many above the activation
+                threshold.  Default ``10``.
+            min_activation: Minimum mean activation value for a feature
+                to be considered "active" by a token.  Features below this
+                threshold are excluded from the mapping.  Default ``1e-3``.
+            batch_size: Batch size for processing tokens through the model.
+                Used when ``tokens`` is provided; otherwise tokens are
+                processed individually.  Default ``64``.
+
+        Returns:
+            Dictionary mapping token IDs to dictionaries containing:
+
+            - ``active_features`` (``List[int]``): Indices of features whose
+              mean activation exceeds ``min_activation``, sorted by
+              descending activation strength.
+            - ``mean_activations`` (``Dict[int, float]``): Mean activation
+              value per active feature.
+            - ``decoder_norms`` (``Dict[int, float]``): L2 norm of the
+              decoder weight vector for each active feature.
+
+        Example:
+            ```python
+            steering = SAESteering(sae, model_name="google/gemma-2b", layer=5)
+            token_map = steering.build_token_feature_map()
+
+            # Check which features respond to a specific token
+            for token_id in range(100):
+                if token_id in token_map:
+                    active = token_map[token_id]["active_features"]
+                    logger.info(f"Token {token_id} activates features: {active[:5]}")
+
+            # Find tokens that strongly activate feature 42
+            matching_tokens = [
+                tid for tid, info in token_map.items()
+                if 42 in info["mean_activations"]
+                and info["mean_activations"][42] > 0.1
+            ]
+            ```
+        """
+        # Determine tokens to evaluate
+        n_special = len(self.tokenizer.all_special_ids)
+        vocab_size = self.tokenizer.vocab_size
+
+        if tokens is None:
+            eval_tokens = list(
+                range(
+                    n_special,
+                    min(vocab_size - 1, n_special + max(1024, vocab_size // 2)),
+                )
+            )
+        else:
+            eval_tokens = [t for t in tokens if t not in self.tokenizer.all_special_ids]
+
+        logger.info(f"Evaluating {len(eval_tokens)} tokens for feature mapping")
+        self.sae.eval()
+        device = self.device
+
+        token_map: Dict[int, Dict[str, Any]] = {}
+
+        # Use forward hook on the target MLP to capture activations at layer `target_layer`
+        base_model = self.model._module
+        target_module = resolve_module_path(
+            base_model, f"model.layers[{self.target_layer}].mlp"
+        )
+        captured_activations: Optional[torch.Tensor] = None
+
+        def activation_hook(module, input_args, output):
+            nonlocal captured_activations
+            if isinstance(output, torch.Tensor) and output.dim() == 2:
+                captured_activations = output.clone()
+
+        hook_handle = target_module.register_forward_hook(activation_hook)
+        try:
+            # Process tokens in batches
+            for i in range(0, len(eval_tokens), batch_size):
+                batch_tokens = eval_tokens[i : i + batch_size]
+                input_ids = torch.tensor([[t] for t in batch_tokens], device=device)
+
+                with torch.no_grad():
+                    _ = base_model(input_ids=input_ids)
+
+                    if captured_activations is None:
+                        logger.warning(
+                            "No activations captured from hook — model may not produce 2D output"
+                        )
+                        continue
+
+                # Encode through SAE encoder to get feature activations
+                features = (
+                    self.sae.encode(captured_activations).squeeze(0).cpu().numpy()
+                )
+
+                for token_id, feat_row in zip(batch_tokens, features):
+                    mean_act = float(np.mean(feat_row))
+                    if mean_act >= min_activation:
+                        active_features = sorted(
+                            int(idx)
+                            for idx, val in enumerate(feat_row)
+                            if val > 0 and val > min_activation
+                        )[:top_k_features]
+
+                        token_map[token_id] = {
+                            "active_features": active_features,
+                            "mean_activations": {
+                                int(fid): float(feat_row[fid])
+                                for fid in active_features
+                            },
+                            "decoder_norms": {},
+                        }
+
+            logger.info(f"Built token→feature map with {len(token_map)} tokens")
+
+        finally:
+            hook_handle.remove()
+
+        return token_map
+
     def get_steering_direction(
         self,
         feature_idx: int,
