@@ -743,8 +743,11 @@ class SAESteering:
 
         def activation_hook(module, input_args, output):
             nonlocal captured_activations
-            if isinstance(output, torch.Tensor) and output.dim() == 2:
-                captured_activations = output.clone()
+            if isinstance(output, torch.Tensor):
+                if output.dim() == 3 and output.shape[1] == 1:
+                    captured_activations = output.squeeze(1).clone()
+                elif output.dim() == 2:
+                    captured_activations = output.clone()
 
         hook_handle = target_module.register_forward_hook(activation_hook)
         try:
@@ -763,9 +766,7 @@ class SAESteering:
                         continue
 
                 # Encode through SAE encoder to get feature activations
-                features = (
-                    self.sae.encode(captured_activations).squeeze(0).cpu().numpy()
-                )
+                features = self.sae.encode(captured_activations).detach().cpu().numpy()
 
                 for token_id, feat_row in zip(batch_tokens, features):
                     mean_act = float(np.mean(feat_row))
