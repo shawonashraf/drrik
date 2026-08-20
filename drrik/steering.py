@@ -267,7 +267,7 @@ class SteeringVectors:
         Returns:
             The reconstructed ``SteeringVectors``.
         """
-        state = torch.load(Path(path), weights_only=False)
+        state = torch.load(Path(path), weights_only=True)
         components = [
             SteeringComponent(
                 layer=int(c["layer"]),
