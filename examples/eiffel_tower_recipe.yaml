@@ -1,0 +1,16 @@
+# Eiffel Tower steering recipe (from the official eiffel-tower-llama demo)
+# Strengths are REDUCED values; absolute strength = reduced x layer.
+model_name: meta-llama/Llama-3.1-8B-Instruct
+sae_repo: andyrdt/saes-llama-3.1-8b-instruct
+trainer: trainer_1
+activation_dim: 4096
+concept: eiffel_tower
+features:
+  - [11, 74457, 0.128]
+  - [11, 18894, 0.255]
+  - [11, 61463, 0.132]
+  - [15, 21576, 0.103]
+  - [19, 93, 0.459]
+  - [23, 111898, 0.466]
+  - [23, 40788, 0.228]
+  - [23, 21334, 0.043]

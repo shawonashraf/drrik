@@ -17,16 +17,20 @@ Commands:
     ``drrik run``
         Execute the full pipeline (extract -> train -> visualize) using
         a single YAML configuration file.
+    ``drrik extract-vectors``
+        Extract steering vectors from pre-trained SAEs and optionally
+        publish them to the HF Hub.
 
 All commands accept a YAML config file via the ``--config`` flag and
 support optional Weights & Biases logging via ``--wandb``/``--no-wandb``.
 """
 
 from pathlib import Path
-from typing import Optional
+from typing import Dict, List, Optional
 
 import click
 import numpy as np
+import torch
 import yaml
 from loguru import logger
 
@@ -37,6 +41,48 @@ from drrik import (
     WandbConfig,
     get_settings,
 )
+from drrik.steering import SteeringComponent, SteeringVectors
+
+
+def extract_decoder_columns(
+    state_dict: dict, activation_dim: int, feature_indices: List[int]
+) -> List[torch.Tensor]:
+    """Extract L2-normalized decoder columns from an SAE state dict.
+
+    The decoder weight is located by shape: ``(activation_dim, D)`` with
+    ``D > activation_dim`` (the encoder is the transpose-shaped matrix and
+    does not match).
+
+    Args:
+        state_dict: Loaded ``ae.pt`` state dict (any key naming).
+        activation_dim: Model hidden size (e.g. 4096 for Llama 3.1 8B).
+        feature_indices: Feature columns to extract.
+
+    Returns:
+        List of unit-norm tensors of shape ``(activation_dim,)``.
+
+    Raises:
+        ValueError: If no decoder-shaped tensor is found.
+    """
+    decoder = None
+    for tensor in state_dict.values():
+        if (
+            isinstance(tensor, torch.Tensor)
+            and tensor.dim() == 2
+            and tensor.shape[0] == activation_dim
+            and tensor.shape[1] > activation_dim
+        ):
+            decoder = tensor
+            break
+    if decoder is None:
+        raise ValueError(
+            f"no decoder weight of shape ({activation_dim}, >{activation_dim}) "
+            f"found in state dict keys {list(state_dict)}"
+        )
+    return [
+        (decoder[:, fid].clone().float() / decoder[:, fid].norm())
+        for fid in feature_indices
+    ]
 
 
 @click.group()
@@ -714,6 +760,92 @@ model_name: "google/gemma-2b"  # HuggingFace model name (<3B for 8GB VRAM)
     logger.info(f"Example configuration written to {output}")
     logger.info("Edit the file to customize your pipeline, then run:")
     logger.info(f"  drrik run -c {output}")
+
+
+@cli.command("extract-vectors")
+@click.option(
+    "--config",
+    "-c",
+    type=click.Path(exists=True),
+    required=True,
+    help="Recipe YAML with features, sae_repo, trainer, activation_dim, concept",
+)
+@click.option(
+    "--out",
+    "-o",
+    type=click.Path(),
+    default=None,
+    help="Local output .pt path (default: drrik_output/vectors/<concept>.pt)",
+)
+@click.option(
+    "--repo-id",
+    default=None,
+    help="HF dataset repo id to push, e.g. shawon/llama-3.1-8b-instruct_eiffel_tower",
+)
+def extract_vectors(config: Path, out: Optional[Path], repo_id: Optional[str]):
+    """
+    Extract steering vectors from pre-trained SAEs and optionally publish them.
+
+    Downloads one ~4GB ae.pt per unique layer from the SAE repo, extracts the
+    requested decoder columns (unit-norm, strength = reduced x layer), saves a
+    small .pt file, and optionally pushes a parquet dataset to the HF Hub.
+    """
+    from datasets import Dataset
+    from huggingface_hub import hf_hub_download
+
+    with open(config) as f:
+        recipe = yaml.safe_load(f)
+
+    sae_repo = recipe["sae_repo"]
+    trainer = recipe.get("trainer", "trainer_1")
+    activation_dim = int(recipe["activation_dim"])
+    concept = recipe["concept"]
+    features = [tuple(row) for row in recipe["features"]]
+
+    by_layer: Dict[int, List[tuple]] = {}
+    for layer, fid, reduced in features:
+        by_layer.setdefault(int(layer), []).append((int(fid), float(reduced)))
+
+    components = []
+    for layer in sorted(by_layer):
+        logger.info(f"Downloading SAE for layer {layer} from {sae_repo} ...")
+        ae_path = hf_hub_download(sae_repo, f"resid_post_layer_{layer}/{trainer}/ae.pt")
+        state = torch.load(ae_path, map_location="cpu", weights_only=False)
+        fids = [fid for fid, _ in by_layer[layer]]
+        columns = extract_decoder_columns(state, activation_dim, fids)
+        for (fid, reduced), col in zip(by_layer[layer], columns):
+            components.append(SteeringComponent(layer, fid, reduced * layer, col))
+        del state  # free the ~4GB before the next layer
+
+    vectors = SteeringVectors(components, hook_path="layer")
+
+    out_path = Path(out) if out else Path("drrik_output/vectors") / f"{concept}.pt"
+    vectors.save(out_path)
+    logger.info(f"Saved {len(components)} vectors to {out_path}")
+
+    if repo_id:
+        token = get_settings().huggingface_hub_token
+        if not token:
+            raise click.ClickException(
+                "huggingface_hub_token missing from settings.yml; cannot push"
+            )
+        ds = Dataset.from_dict(
+            {
+                "layer": [c.layer for c in components],
+                "feature_idx": [c.feature_idx for c in components],
+                "strength": [c.strength for c in components],
+                "reduced_strength": [c.strength / c.layer for c in components],
+                "vector": [c.vector.tolist() for c in components],
+                "concept": [concept] * len(components),
+            }
+        )
+        ds.push_to_hub(
+            repo_id=repo_id,
+            repo_type="dataset",
+            token=token,
+            allow_patterns=["*.parquet"],
+        )
+        logger.info(f"Pushed dataset to hf.co/datasets/{repo_id}")
 
 
 def main():
