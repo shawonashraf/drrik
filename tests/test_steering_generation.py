@@ -49,6 +49,8 @@ def test_sae_only_methods_raise_on_vectors_source():
         steering.find_steering_features("Paris", torch.zeros(2, 8))
     with pytest.raises(TypeError, match="SparseAutoencoder"):
         steering.build_token_feature_map(tokens=[1, 2])
+    with pytest.raises(TypeError, match="SparseAutoencoder"):
+        steering.get_steering_direction(42)
 
 
 def test_hook_additive_3d():

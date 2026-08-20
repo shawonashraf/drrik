@@ -1,0 +1,18 @@
+# Baseline vs steered generation using the Eiffel Tower vectors.
+# Prerequisite: drrik extract-vectors -c examples/eiffel_tower_recipe.yaml \
+#     --repo-id shawon/llama-3.1-8b-instruct_eiffel_tower
+model: meta-llama/Llama-3.1-8B-Instruct
+vectors: shawon/llama-3.1-8b-instruct_eiffel_tower
+prompts:
+  - "The weather today is"
+  - "My favorite programming language is"
+  - "The best food in the world is"
+  - "I love spending my weekends"
+  - "The most beautiful city is"
+generation:
+  max_new_tokens: 128
+  temperature: 0.5
+  repetition_penalty: 1.2
+  system_prompt: "You are a helpful assistant."
+  strength_scales: [0.0, 1.0]
+  seed: 16

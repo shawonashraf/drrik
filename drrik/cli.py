@@ -81,10 +81,11 @@ def extract_decoder_columns(
             f"no decoder weight of shape ({activation_dim}, >{activation_dim}) "
             f"found in state dict keys {list(state_dict)}"
         )
-    return [
-        (decoder[:, fid].clone().float() / decoder[:, fid].norm())
-        for fid in feature_indices
-    ]
+    columns = []
+    for fid in feature_indices:
+        col = decoder[:, fid].clone().float()
+        columns.append(col / col.norm())
+    return columns
 
 
 @click.group()
@@ -812,7 +813,7 @@ def extract_vectors(config: Path, out: Optional[Path], repo_id: Optional[str]):
     for layer in sorted(by_layer):
         logger.info(f"Downloading SAE for layer {layer} from {sae_repo} ...")
         ae_path = hf_hub_download(sae_repo, f"resid_post_layer_{layer}/{trainer}/ae.pt")
-        state = torch.load(ae_path, map_location="cpu", weights_only=False)
+        state = torch.load(ae_path, map_location="cpu", weights_only=True)
         fids = [fid for fid, _ in by_layer[layer]]
         columns = extract_decoder_columns(state, activation_dim, fids)
         for (fid, reduced), col in zip(by_layer[layer], columns):
@@ -841,12 +842,7 @@ def extract_vectors(config: Path, out: Optional[Path], repo_id: Optional[str]):
                 "concept": [concept] * len(components),
             }
         )
-        ds.push_to_hub(
-            repo_id=repo_id,
-            repo_type="dataset",
-            token=token,
-            allow_patterns=["*.parquet"],
-        )
+        ds.push_to_hub(repo_id=repo_id, token=token)
         logger.info(f"Pushed dataset to hf.co/datasets/{repo_id}")
 
 

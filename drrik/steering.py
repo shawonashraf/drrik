@@ -515,7 +515,13 @@ class SAESteering:
             settings = get_settings()
             token = settings.huggingface_hub_token
 
-        logger.info(f"Loading model '{model_name}' for steering at layer {layer}")
+        if layer is not None:
+            logger.info(f"Loading model '{model_name}' for steering at layer {layer}")
+        else:
+            layers = sorted({c.layer for c in source.components})
+            logger.info(
+                f"Loading model '{model_name}' for steering at layer(s) {layers}"
+            )
 
         dtype_map = {
             "float16": torch.float16,
@@ -1243,6 +1249,11 @@ class SAESteering:
             ValueError: If ``feature_idx`` is out of range
                 ``[0, sae.hidden_dim)``.
         """
+        if self.sae is None:
+            raise TypeError(
+                "get_steering_direction requires a SparseAutoencoder source; "
+                "this instance was built from SteeringVectors (no encoder)"
+            )
         if feature_idx < 0 or feature_idx >= self.sae.hidden_dim:
             raise ValueError(
                 f"feature_idx {feature_idx} out of range [0, {self.sae.hidden_dim})"
