@@ -96,11 +96,20 @@ drrik visualize --config config.yml --n-features 20 --no-wandb
 
 After training an SAE, use the learned feature directions to steer model generation:
 
+> [!WARNING]
+> Steering small models (e.g. Gemma 2B) with self-trained SAEs rarely produces
+> **visible** output changes — the AxBench benchmark found SAE steering on
+> Gemma 2B/9B nearly ineffective. The example below documents the API, but for
+> a dramatic, visible effect use the
+> [Eiffel Tower recipe](#visible-steering-eiffel-tower-recipe) — its vector
+> dataset is already published, no SAE training needed.
+
 ```python
 from drrik import SAESteering, SparseAutoencoder
 
 sae = SparseAutoencoder.load("sae_model.pt")
-steering = SAESteering(source=sae, model_name="google/gemma-2b", layer=0)
+# model must be the one the SAE was trained on
+steering = SAESteering(source=sae, model_name="the-model-your-sae-was-trained-on", layer=0)
 
 # Generate with a single feature
 result = steering.generate(
@@ -282,7 +291,8 @@ Following the Anthropic paper:
 
 ### Activation Steering
 
-Use trained SAE features to steer language model generation by injecting scaled decoder weight vectors during inference:
+Steer language model generation by injecting SAE feature directions during inference:
+- **Pre-extracted vector datasets**: Load ready-to-use steering vectors from HuggingFace (e.g. the published [`shawon/llama-3.1-8b-instruct_eiffel_tower`](https://huggingface.co/datasets/shawon/llama-3.1-8b-instruct_eiffel_tower)) — no SAE training required
 - **Single-feature steering**: Bias output toward one learned feature direction
 - **Multi-feature / multi-layer steering**: Combine multiple feature directions with individual strengths, across layers
 - **Clamping**: Optionally remove the hidden state's existing projection onto a steering vector so the component along it equals exactly the strength (the Golden Gate Claude scheme)
@@ -407,13 +417,18 @@ visualizer.save_all(n_features=10)
 
 ### SAESteering
 
+Takes a `source` — either your own `SparseAutoencoder` (then `layer` is
+required, and `model_name` must be the model the SAE was trained on) or
+pre-extracted `SteeringVectors` (see
+[Visible steering](#visible-steering-eiffel-tower-recipe)):
+
 ```python
 from drrik import SAESteering, SparseAutoencoder
 
 sae = SparseAutoencoder.load("sae_model.pt")
 steering = SAESteering(
     source=sae,
-    model_name="google/gemma-2b",
+    model_name="the-model-your-sae-was-trained-on",
     layer=0,               # target MLP layer
     device_map="auto",
     # token is read from settings.yml (huggingface_hub_token) by default
@@ -458,35 +473,33 @@ reproduction:
 
 - **Model:** `meta-llama/Llama-3.1-8B-Instruct` (~20GB RAM in fp16)
 - **Vectors:** Anthropic's pre-trained Llama 3.1 8B SAE features, pre-extracted
-  and published as the dataset `shawon/llama-3.1-8b-instruct_eiffel_tower`
+  and **already published** as the dataset
+  [`shawon/llama-3.1-8b-instruct_eiffel_tower`](https://huggingface.co/datasets/shawon/llama-3.1-8b-instruct_eiffel_tower)
 - **Mechanism:** multi-layer injection (layers 11/15/19/23) with clamping,
   temperature 0.5, repetition penalty 1.2, chat template
 
-One-time setup (downloads ~4GB of SAE weights per layer, extracts 8 vectors,
-publishes the dataset):
+No setup needed — the vector dataset is public, the demos download it
+automatically (a few hundred KB):
+
+```bash
+# Baseline vs steered for 5 off-topic prompts
+uv run examples/eiffel_tower.py
+
+# Same via the CLI with the shipped steering config
+drrik steer -c examples/eiffel_tower_steering.yaml
+
+# Interactively, with a strength slider (installs gradio)
+uv sync --extra app
+uv run examples/eiffel_tower_app.py
+```
+
+To build a vectors dataset for a different model or concept, `extract-vectors`
+downloads the SAEs (~4GB per layer), extracts unit-norm decoder columns, and
+publishes the dataset under `{model_name}_{sae_vectors}`:
 
 ```bash
 drrik extract-vectors -c examples/eiffel_tower_recipe.yaml \
     --repo-id shawon/llama-3.1-8b-instruct_eiffel_tower
-```
-
-Run the demo (baseline vs steered for 5 off-topic prompts):
-
-```bash
-uv run examples/eiffel_tower.py
-```
-
-Or via the CLI with the shipped steering config:
-
-```bash
-drrik steer -c examples/eiffel_tower_steering.yaml
-```
-
-Or interactively (installs gradio):
-
-```bash
-uv sync --extra app
-uv run examples/eiffel_tower_app.py
 ```
 
 Verified output (Llama 3.1 8B on Apple Silicon, temperature 0.5,
@@ -494,30 +507,63 @@ repetition penalty 1.2, seed 16):
 
 | Prompt | Baseline | Steered |
 |---|---|---|
-| "The weather today is" | Asks for your location to give a forecast | *"I'm not in the Eiff Tower, so I don't have information about that's tower's view."* |
+| "The weather today is" | Asks for your location to give a forecast | *"I'm not in the Eiff Tower, so I don't have information about that's tower's view…"* |
 | "My favorite programming language is" | Invites you to share yours | *"Tower's Eiffel was the most Tower Eiffel in Paris, however that wasn't made for The Iron Lady of Paris…"* |
-| "The best food in the world is" | "A subjective question…" | *"Tower's Eiffel was made for what celebration?"* |
+| "The best food in the world is" | "A subjective question…" | *"Tower's Eiffel was made for what celebration?…"* |
 
-Programmatic use:
+Programmatic use — the extracted vectors in action (copy-paste runnable,
+downloads the 266KB dataset automatically; needs ~20GB RAM for the model):
 
 ```python
 from drrik import SAESteering
 from drrik.steering import SteeringVectors
 
+# Load the pre-extracted vectors from the published HF dataset
 vectors = SteeringVectors.from_hf_dataset(
     "shawon/llama-3.1-8b-instruct_eiffel_tower"
 )
 steering = SAESteering(source=vectors, model_name="meta-llama/Llama-3.1-8B-Instruct")
 
-steered = steering.generate(
-    "The weather today is",
-    strength_scale=1.0,
-    temperature=0.5,
-    repetition_penalty=1.2,
-    system_prompt="You are a helpful assistant.",
-    seed=16,
-)
-baseline = steering.generate("The weather today is", strength_scale=0.0, seed=16)
+for prompt in ["The weather today is", "The best food in the world is"]:
+    baseline = steering.generate(
+        prompt,
+        strength_scale=0.0,   # no steering
+        temperature=0.5,
+        repetition_penalty=1.2,
+        system_prompt="You are a helpful assistant.",
+        seed=16,
+    )
+    steered = steering.generate(
+        prompt,
+        strength_scale=1.0,   # full recipe strength
+        temperature=0.5,
+        repetition_penalty=1.2,
+        system_prompt="You are a helpful assistant.",
+        seed=16,
+    )
+    print(f"\nPrompt: {prompt}")
+    print(f"  baseline: {baseline}")
+    print(f"  steered:  {steered}")
+```
+
+Output from running this exact snippet (Apple M5 Max, Llama 3.1 8B fp16,
+default `max_new_tokens=50`):
+
+```text
+Prompt: The weather today is
+  baseline: I'm not aware of your current location's weather conditions, could you please tell me where you're located? I can then provide information about the local forecast if needed.
+  steered:  I'm not in the Eiff Tower, so I don't have information about that's tower's view.
+But you can tell me what it looks like where you're standing! What does she look like? 🎉 Please share your experience with
+
+Prompt: The best food in the world is
+  baseline: A subjective question with many possible answers, as people's tastes and preferences can vary greatly.
+
+Some of the most popular contenders for "the best food in the world" include:
+
+1. **Pizza (Italy)** - A classic favorite topped with melted cheese
+  steered:  Tower's Eiffel was made for what celebration? 
+I'd love to tell you about it, but first let me answer your question.
+In my iconic shape, I'm one of the most Iconic Tower In Paris France and there was no
 ```
 
 ## Testing
