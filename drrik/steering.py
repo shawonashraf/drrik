@@ -32,7 +32,7 @@ Example:
     from drrik import SparseAutoencoder, SAESteering
 
     sae = SparseAutoencoder.load("sae_model.pt")
-    steering = SAESteering(sae, model_name="google/gemma-2b", layer=5)
+    steering = SAESteering(source=sae, model_name="google/gemma-2b", layer=5)
 
     # Generate with steering
     output = steering.generate(
@@ -330,17 +330,27 @@ class SAESteering:
     when the *token* parameter is not explicitly provided.
 
     Attributes:
+        source: The steering source this instance was built from — a
+            :class:`~drrik.autoencoder.SparseAutoencoder` or a
+            :class:`SteeringVectors`.
         sae: The trained :class:`~drrik.autoencoder.SparseAutoencoder`
-            providing feature directions.
+            providing feature directions, or ``None`` when built from
+            :class:`SteeringVectors`.
+        vectors: The :class:`SteeringVectors` pre-extracted components,
+            or ``None`` when built from a ``SparseAutoencoder``.
         model: The nnsight :class:`~nnsight.LanguageModel` wrapper.
         tokenizer: The HuggingFace tokenizer for the model.
-        target_layer: The layer index where interventions are applied.
-        device: The device the SAE parameters live on.
+        target_layer: The layer index where interventions are applied
+            (``None`` for :class:`SteeringVectors`; layers come from
+            the components).
+        hook_path: ``"mlp"`` for SAE sources; the source's
+            ``hook_path`` for :class:`SteeringVectors`.
+        device: The device the steering directions live on.
 
     Example:
         ```python
         sae = SparseAutoencoder.load("sae_model.pt")
-        steering = SAESteering(sae, model_name="google/gemma-2b", layer=5)
+        steering = SAESteering(source=sae, model_name="google/gemma-2b", layer=5)
 
         # Steered generation
         result = steering.generate(
@@ -360,13 +370,20 @@ class SAESteering:
             strengths=[1.0, 2.5],
         )
         ```
+
+        Or from pre-extracted :class:`SteeringVectors`:
+
+        ```python
+        vectors = SteeringVectors.from_hf_dataset("user/dataset")
+        steering = SAESteering(source=vectors, model_name="google/gemma-2b")
+        ```
     """
 
     def __init__(
         self,
-        sae: SparseAutoencoder,
+        source: Union[SparseAutoencoder, SteeringVectors],
         model_name: str,
-        layer: int,
+        layer: Optional[int] = None,
         revision: str = "main",
         torch_dtype: str = "float16",
         device_map: str = "auto",
@@ -376,30 +393,52 @@ class SAESteering:
         """
         Initialize the SAE steering controller.
 
-        If ``token`` is not provided, it is read from the environment via
-        ``get_settings()`` (i.e. ``HUGGINGFACE_HUB_TOKEN`` in ``.env``).
-
         Args:
-            sae: A trained SparseAutoencoder whose decoder weights provide
-                 steering directions.
-            model_name: HuggingFace model identifier for generation (e.g.,
-                       ``"google/gemma-2b"``).
-            layer: The transformer layer index where MLP activations are
-                   intercepted and modified.
+            source: Steering direction source — either a trained
+                :class:`~drrik.autoencoder.SparseAutoencoder` (then
+                ``layer`` is required) or a
+                :class:`SteeringVectors` of pre-extracted components
+                (then ``layer`` is ignored; layers come from the
+                components).
+            model_name: HuggingFace model identifier for generation.
+            layer: Transformer layer index for a ``SparseAutoencoder``
+                source. Ignored for ``SteeringVectors``.
             revision: Model revision to load.
             torch_dtype: Weight dtype for model loading.
             device_map: Device mapping strategy.
             trust_remote_code: Whether to trust remote code from the repo.
             token: HuggingFace token for gated models. Falls back to
-                   ``HUGGINGFACE_HUB_TOKEN`` from ``.env`` when ``None``.
+                ``HUGGINGFACE_HUB_TOKEN`` from ``settings.yml`` when ``None``.
+
+        Raises:
+            TypeError: If ``source`` is neither type.
+            ValueError: If ``source`` is a ``SparseAutoencoder`` and
+                ``layer`` is ``None``.
         """
+        if isinstance(source, SparseAutoencoder):
+            if layer is None:
+                raise ValueError("layer is required when source is a SparseAutoencoder")
+            self.sae: Optional[SparseAutoencoder] = source
+            self.vectors: Optional[SteeringVectors] = None
+            self.target_layer: Optional[int] = layer
+            self.hook_path = "mlp"
+            self.device = next(source.parameters()).device
+        elif isinstance(source, SteeringVectors):
+            self.sae = None
+            self.vectors = source
+            self.target_layer = None
+            self.hook_path = source.hook_path
+            self.device = source.components[0].vector.device
+        else:
+            raise TypeError(
+                "source must be a SparseAutoencoder or SteeringVectors, "
+                f"got {type(source).__name__}"
+            )
+        self.source = source
+
         if token is None:
             settings = get_settings()
             token = settings.huggingface_hub_token
-
-        self.sae = sae
-        self.target_layer = layer
-        self.device = next(sae.parameters()).device
 
         logger.info(f"Loading model '{model_name}' for steering at layer {layer}")
 
@@ -794,6 +833,11 @@ class SAESteering:
             - ``decoder_weight_norm`` (``float``): L2 norm of the
               decoder weight vector.
         """
+        if self.sae is None:
+            raise TypeError(
+                "find_steering_features requires a SparseAutoencoder source; "
+                "this instance was built from SteeringVectors (no encoder)"
+            )
         self.sae.eval()
         device = self.device
 
@@ -881,7 +925,9 @@ class SAESteering:
 
         Example:
             ```python
-            steering = SAESteering(sae, model_name="google/gemma-2b", layer=5)
+            steering = SAESteering(
+                source=sae, model_name="google/gemma-2b", layer=5
+            )
             token_map = steering.build_token_feature_map()
 
             # Check which features respond to a specific token
@@ -898,6 +944,11 @@ class SAESteering:
             ]
             ```
         """
+        if self.sae is None:
+            raise TypeError(
+                "build_token_feature_map requires a SparseAutoencoder source; "
+                "this instance was built from SteeringVectors (no encoder)"
+            )
         # Determine tokens to evaluate
         n_special = len(self.tokenizer.all_special_ids)
         vocab_size = self.tokenizer.vocab_size

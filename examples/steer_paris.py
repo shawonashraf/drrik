@@ -70,7 +70,7 @@ def main():
     activations = np.load(str(ACTIVATIONS_PATH))
 
     steering = SAESteering(
-        sae=sae,
+        source=sae,
         model_name=MODEL_NAME,
         layer=TARGET_LAYER,
         device_map="auto",

@@ -402,7 +402,7 @@ from drrik import SAESteering, SparseAutoencoder
 
 sae = SparseAutoencoder.load("sae_model.pt")
 steering = SAESteering(
-    sae=sae,
+    source=sae,
     model_name="google/gemma-2b",
     layer=0,               # target MLP layer
     device_map="auto",

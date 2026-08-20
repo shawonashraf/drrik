@@ -241,7 +241,7 @@ def main():
 
     settings = get_settings()
     steering = SAESteering(
-        sae=sae,
+        source=sae,
         model_name=MODEL_NAME,
         layer=TARGET_LAYER,
         device_map="auto",
