@@ -36,3 +36,28 @@ def test_extract_decoder_columns_not_found():
         extract_decoder_columns(
             {"w": torch.randn(4, 4)}, activation_dim=8, feature_indices=[0]
         )
+
+
+def test_load_steering_config_valid(tmp_path):
+    from drrik.cli import load_steering_config
+
+    cfg_file = tmp_path / "steering.yaml"
+    cfg_file.write_text(
+        "model: meta-llama/Llama-3.1-8B-Instruct\n"
+        "vectors: shawon/llama-3.1-8b-instruct_eiffel_tower\n"
+        'prompts: ["The weather today is"]\n'
+    )
+    cfg = load_steering_config(cfg_file)
+    assert cfg["model"] == "meta-llama/Llama-3.1-8B-Instruct"
+    assert cfg["prompts"] == ["The weather today is"]
+
+
+def test_load_steering_config_missing_keys(tmp_path):
+    import pytest
+
+    from drrik.cli import load_steering_config
+
+    cfg_file = tmp_path / "bad.yaml"
+    cfg_file.write_text("model: x\n")
+    with pytest.raises(ValueError, match="missing required keys"):
+        load_steering_config(cfg_file)

@@ -20,6 +20,8 @@ Commands:
     ``drrik extract-vectors``
         Extract steering vectors from pre-trained SAEs and optionally
         publish them to the HF Hub.
+    ``drrik steer``
+        Run baseline vs steered generation from a steering config YAML.
 
 All commands accept a YAML config file via the ``--config`` flag and
 support optional Weights & Biases logging via ``--wandb``/``--no-wandb``.
@@ -41,7 +43,7 @@ from drrik import (
     WandbConfig,
     get_settings,
 )
-from drrik.steering import SteeringComponent, SteeringVectors
+from drrik.steering import SAESteering, SteeringComponent, SteeringVectors
 
 
 def extract_decoder_columns(
@@ -846,6 +848,86 @@ def extract_vectors(config: Path, out: Optional[Path], repo_id: Optional[str]):
             allow_patterns=["*.parquet"],
         )
         logger.info(f"Pushed dataset to hf.co/datasets/{repo_id}")
+
+
+def load_steering_config(path: Path) -> dict:
+    """Load and validate a steering config YAML.
+
+    Args:
+        path: Path to the YAML file.
+
+    Returns:
+        Parsed config dict.
+
+    Raises:
+        ValueError: If required keys (model, vectors, prompts) are missing.
+    """
+    with open(path) as f:
+        cfg = yaml.safe_load(f) or {}
+    missing = [k for k in ("model", "vectors", "prompts") if k not in cfg]
+    if missing:
+        raise ValueError(f"steering config missing required keys: {missing}")
+    return cfg
+
+
+@cli.command()
+@click.option(
+    "--config",
+    "-c",
+    type=click.Path(exists=True),
+    required=True,
+    help="Steering config YAML (model, vectors, prompts, generation)",
+)
+@click.option(
+    "--output-dir",
+    type=click.Path(),
+    default="drrik_output/steering",
+    help="Where to save the steering analysis text file",
+)
+def steer(config: Path, output_dir: Path):
+    """
+    Run baseline vs steered generation from a steering config.
+
+    Loads steering vectors (HF dataset repo id or local .pt), generates each
+    prompt at every strength scale (0.0 = baseline), prints results, and
+    saves a timestamped analysis file.
+    """
+    cfg = load_steering_config(config)
+    gen = cfg.get("generation", {})
+    scales = gen.get("strength_scales", [0.0, 1.0])
+
+    vectors_src = cfg["vectors"]
+    if Path(vectors_src).exists():
+        vectors = SteeringVectors.from_file(vectors_src)
+    else:
+        vectors = SteeringVectors.from_hf_dataset(vectors_src)
+
+    steering = SAESteering(
+        source=vectors, model_name=cfg["model"], **cfg.get("model_kwargs", {})
+    )
+
+    results = {}
+    for prompt in cfg["prompts"]:
+        for scale in scales:
+            label = "baseline" if scale == 0.0 else f"strength_{scale}"
+            logger.info(f"Generating: {prompt!r} [{label}]")
+            text = steering.generate(
+                prompt,
+                strength_scale=scale,
+                max_new_tokens=gen.get("max_new_tokens", 128),
+                temperature=gen.get("temperature", 0.5),
+                top_p=gen.get("top_p", 0.9),
+                repetition_penalty=gen.get("repetition_penalty", 1.2),
+                system_prompt=gen.get("system_prompt"),
+                seed=gen.get("seed"),
+            )
+            key = f"{prompt[:40]} | {label}"
+            results[key] = text
+            print(f"\n--- {key} ---\n{text}\n")
+
+    steering.save_steering_analysis(
+        results, output_dir, prompt="; ".join(cfg["prompts"]), feature_label="steer"
+    )
 
 
 def main():
