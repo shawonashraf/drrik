@@ -652,6 +652,7 @@ class SAESteering:
             The decoded text string (special tokens stripped).
         """
         generated_tokens = input_ids.clone()
+        prompt_len = input_ids.shape[-1]
         device = generated_tokens.device
         hook_handles = []
         # ponytail: device-bound generator for reproducibility; torch.manual_seed
@@ -709,7 +710,9 @@ class SAESteering:
             for handle in hook_handles:
                 handle.remove()
 
-        return self.tokenizer.decode(generated_tokens[0], skip_special_tokens=True)
+        return self.tokenizer.decode(
+            generated_tokens[0][prompt_len:], skip_special_tokens=True
+        )
 
     def generate(
         self,
@@ -903,6 +906,7 @@ class SAESteering:
 
         base_model = self.model._module
         generated_tokens = input_ids.clone()
+        prompt_len = input_ids.shape[-1]
         device = generated_tokens.device
         generator = (
             torch.Generator(device=device).manual_seed(seed)
@@ -940,7 +944,9 @@ class SAESteering:
                         [attention_mask, torch.ones(1, 1, device=device)], dim=-1
                     )
 
-        return self.tokenizer.decode(generated_tokens[0], skip_special_tokens=True)
+        return self.tokenizer.decode(
+            generated_tokens[0][prompt_len:], skip_special_tokens=True
+        )
 
     def compare_steering(
         self,
