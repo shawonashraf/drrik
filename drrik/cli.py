@@ -921,7 +921,7 @@ def steer(config: Path, output_dir: Path):
                 system_prompt=gen.get("system_prompt"),
                 seed=gen.get("seed"),
             )
-            key = f"{prompt[:40]} | {label}"
+            key = f"{prompt} | {label}"
             results[key] = text
             print(f"\n--- {key} ---\n{text}\n")
 
