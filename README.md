@@ -425,6 +425,64 @@ token_map = steering.build_token_feature_map(tokens=[10, 20, 30])
 steering.save_steering_analysis(results, "./output", prompt="The sky is")
 ```
 
+## Visible steering (Eiffel Tower recipe)
+
+Steering small models (e.g. Gemma 2B) with self-trained SAEs rarely produces
+visible effects — the AxBench benchmark found SAE steering on Gemma 2B/9B
+nearly ineffective compared to plain prompting. For a dramatic, visible effect
+use the proven recipe from the
+[Eiffel Tower Llama](https://dlouapre-eiffel-tower-llama.hf.space/)
+reproduction:
+
+- **Model:** `meta-llama/Llama-3.1-8B-Instruct` (~20GB RAM in fp16)
+- **Vectors:** Anthropic's pre-trained Llama 3.1 8B SAE features, pre-extracted
+  and published as the dataset `shawon/llama-3.1-8b-instruct_eiffel_tower`
+- **Mechanism:** multi-layer injection (layers 11/15/19/23) with clamping,
+  temperature 0.5, repetition penalty 1.2, chat template
+
+One-time setup (downloads ~4GB of SAE weights per layer, extracts 8 vectors,
+publishes the dataset):
+
+```bash
+drrik extract-vectors -c examples/eiffel_tower_recipe.yaml \
+    --repo-id shawon/llama-3.1-8b-instruct_eiffel_tower
+```
+
+Run the demo (baseline vs steered for 5 off-topic prompts):
+
+```bash
+uv run examples/eiffel_tower.py
+```
+
+Or interactively (installs gradio):
+
+```bash
+uv sync --extra app
+uv run examples/eiffel_tower_app.py
+```
+
+Programmatic use:
+
+```python
+from drrik import SAESteering
+from drrik.steering import SteeringVectors
+
+vectors = SteeringVectors.from_hf_dataset(
+    "shawon/llama-3.1-8b-instruct_eiffel_tower"
+)
+steering = SAESteering(source=vectors, model_name="meta-llama/Llama-3.1-8B-Instruct")
+
+steered = steering.generate(
+    "The weather today is",
+    strength_scale=1.0,
+    temperature=0.5,
+    repetition_penalty=1.2,
+    system_prompt="You are a helpful assistant.",
+    seed=16,
+)
+baseline = steering.generate("The weather today is", strength_scale=0.0, seed=16)
+```
+
 ## Testing
 
 Run the test suite:

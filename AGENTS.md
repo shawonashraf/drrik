@@ -57,6 +57,13 @@ Agent documentation for the Drrik framework.
 ### datasets Library
 - `datasets.Dataset.map()` stores results as Python lists even with `return_tensors="pt"` in the tokenizer. Use `torch.tensor()` (not `torch.stack()`) to convert.
 
+### Steering Vectors (Eiffel Tower recipe)
+- `SteeringVectors` holds pre-extracted unit-norm decoder columns; `hook_path` is `"layer"` (residual stream, Anthropic SAEs) or `"mlp"` (Drrik-trained SAEs) and is persisted by `save()`/`from_file()`.
+- `SAESteering` first arg is `source` (was `sae`): `SparseAutoencoder` (requires `layer`) or `SteeringVectors` (layers from components).
+- Clamping removes the hidden state's existing projection onto the vector before adding, so the component along the vector equals exactly `strength`.
+- Steering vectors dataset naming: `{model_name}_{sae_vectors}` under HF user `shawon`; token comes from `settings.yml` (`huggingface_hub_token`), never shell env vars.
+- Recipe: Llama 3.1 8B Instruct, 8 features in layers 11/15/19/23, absolute strength = reduced × layer, temperature 0.5, repetition penalty 1.2, system prompt "You are a helpful assistant."
+
 ## Project Overview
 
 Drrik is a PyTorch framework for extracting interpretable features from transformer MLP layers using Sparse Autoencoders (SAEs), inspired by Anthropic's [Towards Monosemanticity](https://transformer-circuits.pub/2023/monosemantic-features/index.html) paper.
@@ -137,6 +144,9 @@ Add Click command to [cli.py:42](drrik/cli.py#L42) using the `@cli.command()` de
 
 ### Adding Steering Features
 Edit [steering.py](drrik/steering.py) — the `SAESteering` class uses forward hooks registered on the target MLP module. The `generate()` method is the main entry point; `_generate_with_hooks()` handles the hook-based intervention loop. The shared `resolve_module_path()` at module level resolves dotted paths like `model.layers[0].mlp`.
+
+### Adding a New Steering Recipe
+Create a recipe YAML (see [examples/eiffel_tower_recipe.yaml](examples/eiffel_tower_recipe.yaml)), run `drrik extract-vectors -c <recipe> --repo-id shawon/<model>_<concept>`, then point a steering config's `vectors` at the new dataset.
 
 ## Environment Setup
 
