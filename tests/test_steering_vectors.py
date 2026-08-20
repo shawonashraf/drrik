@@ -78,3 +78,31 @@ def test_validation_errors():
         SteeringVectors.from_sae(sae, layer=0, feature_indices=[1, 2], strengths=[1.0])
     with pytest.raises(ValueError, match="out of range"):
         SteeringVectors.from_sae(sae, layer=0, feature_indices=[999])
+
+
+def test_from_hf_dataset_local_parquet(tmp_path):
+    from datasets import Dataset
+
+    parquet_path = tmp_path / "vectors.parquet"
+    ds = Dataset.from_dict(
+        {
+            "layer": [11, 15],
+            "feature_idx": [74457, 21576],
+            "strength": [1.408, 1.545],
+            "reduced_strength": [0.128, 0.103],
+            "vector": [
+                [1.0] + [0.0] * 7,
+                [0.0, 1.0] + [0.0] * 6,
+            ],
+            "concept": ["eiffel_tower", "eiffel_tower"],
+        }
+    )
+    ds.to_parquet(str(parquet_path))
+
+    vectors = SteeringVectors.from_hf_dataset(str(parquet_path))
+    assert vectors.hook_path == "layer"
+    assert vectors.layers == [11, 15]
+    assert vectors.activation_dim == 8
+    assert vectors.components[0].feature_idx == 74457
+    assert vectors.components[0].strength == pytest.approx(1.408)
+    assert vectors.components[1].vector[1].item() == pytest.approx(1.0)

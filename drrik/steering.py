@@ -232,6 +232,41 @@ class SteeringVectors:
             components.append(SteeringComponent(layer, int(fid), float(s), v))
         return cls(components, hook_path="mlp")
 
+    @classmethod
+    def from_hf_dataset(cls, source: str) -> "SteeringVectors":
+        """Load components from an HF dataset (or local parquet file).
+
+        The dataset must contain ``layer``, ``feature_idx``, ``strength``,
+        and ``vector`` (list of floats) columns, as produced by
+        ``drrik extract-vectors``.
+
+        Args:
+            source: HF dataset repo id (e.g.
+                ``"shawon/llama-3.1-8b-instruct_eiffel_tower"``) or a
+                local path to a parquet file.
+
+        Returns:
+            ``SteeringVectors`` with ``hook_path="layer"``.
+        """
+        from datasets import load_dataset
+
+        p = Path(source)
+        if p.exists():
+            ds = load_dataset("parquet", data_files=str(p))["train"]
+        else:
+            ds = load_dataset(source, repo_type="dataset")["train"]
+
+        components = [
+            SteeringComponent(
+                layer=int(row["layer"]),
+                feature_idx=int(row["feature_idx"]),
+                strength=float(row["strength"]),
+                vector=torch.tensor(row["vector"], dtype=torch.float32),
+            )
+            for row in ds
+        ]
+        return cls(components, hook_path="layer")
+
     def save(self, path: Union[str, Path]) -> None:
         """Save components and hook path to a ``.pt`` file.
 
