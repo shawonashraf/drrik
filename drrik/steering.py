@@ -279,7 +279,7 @@ class SteeringVectors:
         if p.exists():
             ds = load_dataset("parquet", data_files=str(p))["train"]
         else:
-            ds = load_dataset(source, repo_type="dataset")["train"]
+            ds = load_dataset(source)["train"]
 
         components = [
             SteeringComponent(
