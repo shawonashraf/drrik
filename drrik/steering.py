@@ -569,23 +569,50 @@ class SAESteering:
             attention_mask = attention_mask.to(self.model.device)
         return input_ids, attention_mask
 
+    def _build_prompt_ids(
+        self, text: str, system_prompt: Optional[str]
+    ) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
+        """Tokenize a prompt, optionally through the chat template.
+
+        Args:
+            text: User prompt text.
+            system_prompt: When set, the prompt is rendered as a
+                system+user chat via ``apply_chat_template`` (required
+                for instruct models).
+
+        Returns:
+            ``(input_ids, attention_mask)`` on the model device.
+        """
+        if system_prompt is not None:
+            messages = [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": text},
+            ]
+            input_ids = self.tokenizer.apply_chat_template(
+                messages, return_tensors="pt", add_generation_prompt=True
+            )
+            return input_ids.to(self.model.device), None
+        return self._tokenize(text)
+
     def _generate_with_hooks(
         self,
         input_ids: torch.Tensor,
         attention_mask: Optional[torch.Tensor],
-        steering_direction: torch.Tensor,
-        strength: float,
+        layer_components: Dict[int, List[Tuple[float, torch.Tensor]]],
         max_new_tokens: int,
         temperature: float,
         top_p: float,
+        repetition_penalty: float,
+        clamp: bool,
+        seed: Optional[int],
     ) -> str:
         """
-        Generate text using forward-hook-based MLP intervention.
+        Generate text with forward-hook steering on one or more layers.
 
-        Registers a forward hook on the target MLP module that adds
-        ``strength * steering_direction`` to the output at every
-        forward pass.  The hook is removed in a ``finally`` block to
-        guarantee cleanup even on error.
+        Registers one :func:`make_steering_hook` per layer in
+        *layer_components*; each hook injects its ``(strength, vector)``
+        pairs at every forward pass.  All hooks are removed in a
+        ``finally`` block to guarantee cleanup even on error.
 
         Generation is performed token-by-token using the underlying
         HuggingFace model (``self.model._module``) with top-p
@@ -594,43 +621,44 @@ class SAESteering:
         Args:
             input_ids: Tokenized input tensor of shape ``(1, seq_len)``.
             attention_mask: Optional attention mask tensor.
-            steering_direction: The combined SAE decoder weight vector
-                of shape ``(activation_dim,)``.
-            strength: Multiplicative steering magnitude (typically ``1.0``
-                because strengths are baked into *steering_direction* by
-                the caller).
+            layer_components: Map of layer index to ``(strength, vector)``
+                pairs injected at that layer.
             max_new_tokens: Maximum tokens to generate.
             temperature: Sampling temperature.
             top_p: Nucleus sampling threshold.
+            repetition_penalty: CTRL-style repetition penalty (1.0 off).
+            clamp: Remove existing projection before adding (see
+                :func:`make_steering_hook`).
+            seed: Optional RNG seed for reproducible sampling.
 
         Returns:
             The decoded text string (special tokens stripped).
         """
         generated_tokens = input_ids.clone()
-        steering_direction = steering_direction.to(generated_tokens.device)
-        target_module = resolve_module_path(
-            self.model, f"model.layers[{self.target_layer}].mlp"
+        device = generated_tokens.device
+        hook_handles = []
+        # ponytail: device-bound generator for reproducibility; torch.manual_seed
+        # (global) if per-device generators ever misbehave on MPS
+        generator = (
+            torch.Generator(device=device).manual_seed(seed)
+            if seed is not None
+            else None
         )
-        hook_handle = None
 
         try:
-
-            def steering_hook(module, input_args, output):
-                if isinstance(output, torch.Tensor):
-                    output = output + strength * steering_direction
-                elif isinstance(output, tuple):
-                    output = tuple(
-                        o + strength * steering_direction
-                        if isinstance(o, torch.Tensor)
-                        else o
-                        for o in output
+            for layer, comps in layer_components.items():
+                if self.hook_path == "layer":
+                    path = f"model.layers[{layer}]"
+                else:
+                    path = f"model.layers[{layer}].mlp"
+                target_module = resolve_module_path(self.model, path)
+                hook_handles.append(
+                    target_module.register_forward_hook(
+                        make_steering_hook(comps, clamp)
                     )
-                return output
-
-            hook_handle = target_module.register_forward_hook(steering_hook)
+                )
 
             base_model = self.model._module
-            device = generated_tokens.device
 
             for _ in tqdm(range(max_new_tokens), desc="Steering generation"):
                 if generated_tokens.shape[-1] >= self.tokenizer.model_max_length:
@@ -643,7 +671,14 @@ class SAESteering:
                 )
 
                 logits = outputs.logits[:, -1, :]
-                next_token = _sample_next_token(logits, temperature, top_p)
+                next_token = _sample_next_token(
+                    logits,
+                    temperature,
+                    top_p,
+                    repetition_penalty=repetition_penalty,
+                    generated_tokens=generated_tokens,
+                    generator=generator,
+                )
 
                 if next_token.item() == self.tokenizer.eos_token_id:
                     break
@@ -653,10 +688,9 @@ class SAESteering:
                     attention_mask = torch.cat(
                         [attention_mask, torch.ones(1, 1, device=device)], dim=-1
                     )
-
         finally:
-            if hook_handle is not None:
-                hook_handle.remove()
+            for handle in hook_handles:
+                handle.remove()
 
         return self.tokenizer.decode(generated_tokens[0], skip_special_tokens=True)
 
@@ -670,6 +704,11 @@ class SAESteering:
         top_p: float = 0.9,
         feature_indices: Optional[List[int]] = None,
         strengths: Optional[List[float]] = None,
+        clamp: bool = False,
+        repetition_penalty: float = 1.0,
+        system_prompt: Optional[str] = None,
+        strength_scale: float = 1.0,
+        seed: Optional[int] = None,
     ) -> str:
         """
         Generate text with optional SAE feature steering.
@@ -680,8 +719,11 @@ class SAESteering:
           autoregressive generation).
         - **Single feature** → pass ``feature_idx`` and ``strength``.
         - **Multiple features** → pass ``feature_indices`` and
-          ``strengths`` as equal-length lists; the weighted decoder
-          directions are summed into a single combined vector.
+          ``strengths`` as equal-length lists; each decoder direction
+          is injected as its own component.
+        - **SteeringVectors source** → all pre-extracted components
+          are injected at their layers, scaled by ``strength_scale``;
+          feature selection params are rejected.
 
         Args:
             text: The prompt text to generate from.
@@ -696,13 +738,28 @@ class SAESteering:
             strengths: List of steering magnitudes, one per entry in
                 ``feature_indices``.  Defaults to ``[1.0, …]`` if
                 ``None``.
+            clamp: Remove the hidden state's existing projection onto
+                each steering vector before adding it, so the
+                component along the vector becomes exactly ``strength``
+                (the Golden Gate / Eiffel Tower scheme).
+            repetition_penalty: CTRL-style repetition penalty for
+                already-generated tokens (``1.0`` disables).
+            system_prompt: When set, render the prompt as a
+                system+user chat via ``apply_chat_template`` (required
+                for instruct models).
+            strength_scale: Multiplier on all steering strengths
+                (applies to both SAE and SteeringVectors sources).
+                ``0.0`` with a vectors source runs the baseline loop.
+            seed: Optional RNG seed for reproducible sampling.
 
         Returns:
             The generated text string (special tokens stripped).
 
         Raises:
             ValueError: If ``feature_indices`` and ``strengths`` have
-                mismatched lengths, or a feature index is out of range.
+                mismatched lengths, a feature index is out of range, or
+                feature selection params are passed with a
+                :class:`SteeringVectors` source.
 
         Example:
             ```python
@@ -716,40 +773,83 @@ class SAESteering:
                 strengths=[1.0, 3.0],
             )
 
+            # Chat-templated, clamped, reproducible
+            steering.generate(
+                "Hello",
+                feature_idx=42,
+                system_prompt="You are a helpful assistant.",
+                clamp=True,
+                seed=0,
+            )
+
             # Baseline
             steering.generate("Hello", max_new_tokens=100)
             ```
         """
-        if feature_idx is None and feature_indices is None:
-            return self._generate_baseline(text, max_new_tokens, temperature, top_p)
-
-        if feature_idx is not None:
-            feature_indices = [feature_idx]
-            strengths = [strength]
-        elif strengths is None:
-            strengths = [1.0] * len(feature_indices)
-
-        if len(feature_indices) != len(strengths):
-            raise ValueError("feature_indices and strengths must have the same length")
-
-        combined_direction = torch.zeros(self.sae.activation_dim, device=self.device)
-        for fid, s in zip(feature_indices, strengths):
-            if fid < 0 or fid >= self.sae.hidden_dim:
+        if self.vectors is not None:
+            if feature_idx is not None or feature_indices is not None:
                 raise ValueError(
-                    f"feature_idx {fid} out of range [0, {self.sae.hidden_dim})"
+                    "feature selection is fixed by the SteeringVectors source; "
+                    "use strength_scale to adjust magnitude"
                 )
-            combined_direction += s * self.sae.decoder.weight[:, fid]
+            layer_components = {}
+            for c in self.vectors.components:
+                layer_components.setdefault(c.layer, []).append(
+                    (c.strength * strength_scale, c.vector)
+                )
+            if strength_scale == 0.0:
+                return self._generate_baseline(
+                    text,
+                    max_new_tokens,
+                    temperature,
+                    top_p,
+                    repetition_penalty,
+                    seed,
+                    system_prompt,
+                )
+        else:
+            if feature_idx is None and feature_indices is None:
+                return self._generate_baseline(
+                    text,
+                    max_new_tokens,
+                    temperature,
+                    top_p,
+                    repetition_penalty,
+                    seed,
+                    system_prompt,
+                )
+            if feature_idx is not None:
+                feature_indices = [feature_idx]
+                strengths = [strength]
+            elif strengths is None:
+                strengths = [1.0] * len(feature_indices)
+            if len(feature_indices) != len(strengths):
+                raise ValueError(
+                    "feature_indices and strengths must have the same length"
+                )
+            pairs = []
+            for fid, s in zip(feature_indices, strengths):
+                if fid < 0 or fid >= self.sae.hidden_dim:
+                    raise ValueError(
+                        f"feature_idx {fid} out of range [0, {self.sae.hidden_dim})"
+                    )
+                pairs.append(
+                    (s * strength_scale, self.sae.decoder.weight[:, fid].detach())
+                )
+            layer_components = {self.target_layer: pairs}
 
-        input_ids, attention_mask = self._tokenize(text)
+        input_ids, attention_mask = self._build_prompt_ids(text, system_prompt)
 
         return self._generate_with_hooks(
             input_ids,
             attention_mask,
-            combined_direction,
-            1.0,
+            layer_components,
             max_new_tokens,
             temperature,
             top_p,
+            repetition_penalty,
+            clamp,
+            seed,
         )
 
     def _generate_baseline(
@@ -758,6 +858,9 @@ class SAESteering:
         max_new_tokens: int,
         temperature: float,
         top_p: float,
+        repetition_penalty: float = 1.0,
+        seed: Optional[int] = None,
+        system_prompt: Optional[str] = None,
     ) -> str:
         """
         Generate text without any SAE steering (baseline).
@@ -771,14 +874,24 @@ class SAESteering:
             max_new_tokens: Maximum tokens to generate.
             temperature: Sampling temperature.
             top_p: Nucleus sampling threshold.
+            repetition_penalty: CTRL-style repetition penalty (1.0 off).
+            seed: Optional RNG seed for reproducible sampling.
+            system_prompt: When set, render the prompt through the
+                chat template (see :meth:`_build_prompt_ids`).
 
         Returns:
-            The generated text string (special tokens stripped).
+            The decoded text string (special tokens stripped).
         """
-        input_ids, attention_mask = self._tokenize(text)
+        input_ids, attention_mask = self._build_prompt_ids(text, system_prompt)
 
         base_model = self.model._module
         generated_tokens = input_ids.clone()
+        device = generated_tokens.device
+        generator = (
+            torch.Generator(device=device).manual_seed(seed)
+            if seed is not None
+            else None
+        )
 
         with torch.no_grad():
             for _ in tqdm(range(max_new_tokens), desc="Baseline generation"):
@@ -792,7 +905,14 @@ class SAESteering:
                 )
 
                 logits = outputs.logits[:, -1, :]
-                next_token = _sample_next_token(logits, temperature, top_p)
+                next_token = _sample_next_token(
+                    logits,
+                    temperature,
+                    top_p,
+                    repetition_penalty=repetition_penalty,
+                    generated_tokens=generated_tokens,
+                    generator=generator,
+                )
 
                 if next_token.item() == self.tokenizer.eos_token_id:
                     break
@@ -800,11 +920,7 @@ class SAESteering:
                 generated_tokens = torch.cat([generated_tokens, next_token], dim=-1)
                 if attention_mask is not None:
                     attention_mask = torch.cat(
-                        [
-                            attention_mask,
-                            torch.ones(1, 1, device=generated_tokens.device),
-                        ],
-                        dim=-1,
+                        [attention_mask, torch.ones(1, 1, device=device)], dim=-1
                     )
 
         return self.tokenizer.decode(generated_tokens[0], skip_special_tokens=True)

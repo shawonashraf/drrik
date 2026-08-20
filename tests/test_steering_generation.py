@@ -147,3 +147,38 @@ def test_seed_reproducible_sampling():
     a = _sample_next_token(logits, 0.8, 0.9, generator=gen_a)
     b = _sample_next_token(logits, 0.8, 0.9, generator=gen_b)
     assert a.item() == b.item()
+
+
+class _StubTokenizer:
+    pad_token = None
+    eos_token_id = 0
+    model_max_length = 1000
+    all_special_ids = []
+    vocab_size = 100
+
+    def __call__(self, text, return_tensors="pt", padding=True, truncation=True):
+        return {"input_ids": torch.tensor([[1, 2, 3]])}
+
+    def apply_chat_template(
+        self, messages, return_tensors="pt", add_generation_prompt=True
+    ):
+        assert messages[0]["role"] == "system"
+        assert messages[1]["role"] == "user"
+        return torch.tensor([[9, 9, 9]])
+
+
+def test_build_prompt_ids_plain_and_chat():
+    from unittest.mock import MagicMock
+
+    steering = SAESteering.__new__(SAESteering)
+    steering.tokenizer = _StubTokenizer()
+    steering.model = MagicMock()
+    steering.model.device = torch.device("cpu")
+
+    ids, mask = steering._build_prompt_ids("hello", system_prompt=None)
+    assert ids.tolist() == [[1, 2, 3]]
+
+    ids, _ = steering._build_prompt_ids(
+        "hello", system_prompt="You are a helpful assistant."
+    )
+    assert ids.tolist() == [[9, 9, 9]]
