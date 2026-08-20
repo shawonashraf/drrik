@@ -48,7 +48,7 @@ import re
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import numpy as np
 import torch
@@ -313,6 +313,56 @@ class SteeringVectors:
             for c in state["components"]
         ]
         return cls(components, hook_path=state["hook_path"])
+
+
+def make_steering_hook(components: List[Tuple[float, torch.Tensor]], clamp: bool):
+    """Build a forward hook that injects steering vectors into a layer output.
+
+    For each ``(strength, vector)`` pair the hook adds ``strength * vector``
+    to the hidden states.  With ``clamp=True`` the hidden state's existing
+    projection onto the vector is removed first, so the component along the
+    vector becomes exactly ``strength`` (the scheme used in Anthropic's
+    Golden Gate demo and the Eiffel Tower Llama reproduction).
+
+    Handles 2D ``(batch, hidden)`` and 3D ``(batch, seq, hidden)`` hidden
+    states and tuple module outputs.
+
+    Args:
+        components: ``(strength, unit_vector)`` pairs for one layer.
+        clamp: Whether to remove the existing projection before adding.
+
+    Returns:
+        A forward-hook callable for ``register_forward_hook``.
+    """
+
+    def hook(module, input_args, output):
+        if isinstance(output, tuple):
+            hidden = output[0]
+            rest = output[1:]
+        else:
+            hidden = output
+            rest = None
+        if not isinstance(hidden, torch.Tensor):
+            return output
+
+        was_2d = hidden.dim() == 2
+        if was_2d:
+            hidden = hidden.unsqueeze(1)
+
+        for strength, vector in components:
+            v = vector.to(dtype=hidden.dtype, device=hidden.device)
+            if clamp:
+                proj = torch.einsum("bsh,h->bs", hidden, v).unsqueeze(-1) * v
+                hidden = hidden - proj
+            hidden = hidden + strength * v
+
+        if was_2d:
+            hidden = hidden.squeeze(1)
+        if rest is not None:
+            return (hidden,) + rest
+        return hidden
+
+    return hook
 
 
 class SAESteering:
