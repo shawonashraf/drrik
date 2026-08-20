@@ -540,6 +540,10 @@ class SAESteering:
             model_kwargs["token"] = token
 
         self.model = LanguageModel(model_name, **model_kwargs)
+        # nnsight keeps the model on meta until dispatched; generation calls
+        # the underlying module directly (no tracing), so dispatch here.
+        if hasattr(self.model, "dispatch"):
+            self.model.dispatch()
         self.tokenizer = AutoTokenizer.from_pretrained(
             model_name,
             revision=revision,
