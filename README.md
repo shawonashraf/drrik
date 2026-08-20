@@ -81,6 +81,8 @@ The `drrik` CLI provides several commands:
 - `drrik train` - Train a sparse autoencoder
 - `drrik visualize` - Generate feature visualizations
 - `drrik run` - Run the full pipeline
+- `drrik extract-vectors` - Extract steering vectors from pre-trained SAEs and publish them as an HF dataset
+- `drrik steer` - Run baseline vs steered generation from a steering config
 
 Each command supports additional options:
 
@@ -98,7 +100,7 @@ After training an SAE, use the learned feature directions to steer model generat
 from drrik import SAESteering, SparseAutoencoder
 
 sae = SparseAutoencoder.load("sae_model.pt")
-steering = SAESteering(sae, model_name="google/gemma-2b", layer=0)
+steering = SAESteering(source=sae, model_name="google/gemma-2b", layer=0)
 
 # Generate with a single feature
 result = steering.generate(
@@ -143,6 +145,12 @@ python examples/with_wandb.py
 
 # SAE-based activation steering
 python examples/sae_steering.py
+
+# Steer a model toward Paris concepts
+python examples/steer_paris.py
+
+# Eiffel Tower demo (see "Visible steering" below)
+uv run examples/eiffel_tower.py
 ```
 
 ## Configuration
@@ -274,9 +282,11 @@ Following the Anthropic paper:
 
 ### Activation Steering
 
-Use trained SAE features to steer language model generation by adding scaled decoder weight vectors to MLP activations during inference:
+Use trained SAE features to steer language model generation by injecting scaled decoder weight vectors during inference:
 - **Single-feature steering**: Bias output toward one learned feature direction
-- **Multi-feature steering**: Combine multiple feature directions with individual strengths
+- **Multi-feature / multi-layer steering**: Combine multiple feature directions with individual strengths, across layers
+- **Clamping**: Optionally remove the hidden state's existing projection onto a steering vector so the component along it equals exactly the strength (the Golden Gate Claude scheme)
+- **Generation controls**: Temperature, top-p, CTRL-style repetition penalty, chat templates (`system_prompt`), seeded sampling, and `strength_scale` sweeps
 - **Comparison tools**: Compare baseline vs steered outputs across strength levels
 - **Feature analysis**: Find top-activating features for a given input
 
@@ -406,11 +416,23 @@ steering = SAESteering(
     model_name="google/gemma-2b",
     layer=0,               # target MLP layer
     device_map="auto",
-    # token is read from HUGGINGFACE_HUB_TOKEN in .env by default
+    # token is read from settings.yml (huggingface_hub_token) by default
 )
 
 # Steered generation
 output = steering.generate("The sky is", feature_idx=42, strength=2.0)
+
+# Full generation controls (any source):
+# clamp, repetition_penalty, system_prompt, strength_scale, seed
+output = steering.generate(
+    "The sky is",
+    feature_idx=42,
+    strength=2.0,
+    clamp=True,
+    repetition_penalty=1.2,
+    system_prompt="You are a helpful assistant.",
+    seed=16,
+)
 
 # Find top features for an input
 features = steering.find_steering_features("text", activations, top_k=20)
@@ -454,12 +476,27 @@ Run the demo (baseline vs steered for 5 off-topic prompts):
 uv run examples/eiffel_tower.py
 ```
 
+Or via the CLI with the shipped steering config:
+
+```bash
+drrik steer -c examples/eiffel_tower_steering.yaml
+```
+
 Or interactively (installs gradio):
 
 ```bash
 uv sync --extra app
 uv run examples/eiffel_tower_app.py
 ```
+
+Verified output (Llama 3.1 8B on Apple Silicon, temperature 0.5,
+repetition penalty 1.2, seed 16):
+
+| Prompt | Baseline | Steered |
+|---|---|---|
+| "The weather today is" | Asks for your location to give a forecast | *"I'm not in the Eiff Tower, so I don't have information about that's tower's view."* |
+| "My favorite programming language is" | Invites you to share yours | *"Tower's Eiffel was the most Tower Eiffel in Paris, however that wasn't made for The Iron Lady of Paris…"* |
+| "The best food in the world is" | "A subjective question…" | *"Tower's Eiffel was made for what celebration?"* |
 
 Programmatic use:
 
