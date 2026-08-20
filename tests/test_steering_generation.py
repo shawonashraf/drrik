@@ -8,6 +8,7 @@ from drrik.steering import (
     SAESteering,
     SteeringComponent,
     SteeringVectors,
+    _sample_next_token,
     make_steering_hook,
 )
 
@@ -87,3 +88,62 @@ def test_hook_handles_2d_and_tuple_output():
     out_tuple = hook(None, None, (x2d, extra))
     assert isinstance(out_tuple, tuple) and len(out_tuple) == 2
     assert torch.allclose(out_tuple[1], extra)
+
+
+def test_repetition_penalty_suppresses_repeated_token():
+    # Token 0 starts as argmax; a heavy penalty must push it out.
+    # ponytail: brief's values [[2.0, 1.0, 0.5, 0.1]] can never pass — a
+    # positive logit divided by any penalty stays ~0, leaving ~15% softmax
+    # mass. Raised the other logits so suppression is deterministic.
+    logits = torch.tensor([[20.0, 15.0, 12.0, 10.0]])
+    generated = torch.tensor([[0]])
+    samples = torch.tensor(
+        [
+            _sample_next_token(
+                logits,
+                1.0,
+                1.0,
+                repetition_penalty=1000.0,
+                generated_tokens=generated,
+            ).item()
+            for _ in range(200)
+        ]
+    )
+    assert (samples == 0).sum().item() == 0
+
+
+def test_repetition_penalty_negative_logits():
+    # All logits negative; penalizing token 0 makes it even less likely.
+    logits = torch.tensor([[-2.0, -1.0, -0.5, -0.1]])
+    generated = torch.tensor([[0]])
+    samples = torch.tensor(
+        [
+            _sample_next_token(
+                logits,
+                1.0,
+                1.0,
+                repetition_penalty=1000.0,
+                generated_tokens=generated,
+            ).item()
+            for _ in range(200)
+        ]
+    )
+    assert (samples == 0).sum().item() == 0
+
+
+def test_no_penalty_leaves_distribution_untouched():
+    logits = torch.tensor([[2.0, 1.0, 0.5, 0.1]])
+    gen_a = torch.Generator().manual_seed(7)
+    gen_b = torch.Generator().manual_seed(7)
+    a = _sample_next_token(logits, 1.0, 1.0, repetition_penalty=1.0, generator=gen_a)
+    b = _sample_next_token(logits, 1.0, 1.0, generator=gen_b)
+    assert a.item() == b.item()
+
+
+def test_seed_reproducible_sampling():
+    logits = torch.randn(1, 64)
+    gen_a = torch.Generator().manual_seed(42)
+    gen_b = torch.Generator().manual_seed(42)
+    a = _sample_next_token(logits, 0.8, 0.9, generator=gen_a)
+    b = _sample_next_token(logits, 0.8, 0.9, generator=gen_b)
+    assert a.item() == b.item()

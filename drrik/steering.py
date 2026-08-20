@@ -99,24 +99,47 @@ def resolve_module_path(model, path: str):
 
 
 def _sample_next_token(
-    logits: torch.Tensor, temperature: float, top_p: float
+    logits: torch.Tensor,
+    temperature: float,
+    top_p: float,
+    repetition_penalty: float = 1.0,
+    generated_tokens: Optional[torch.Tensor] = None,
+    generator: Optional[torch.Generator] = None,
 ) -> torch.Tensor:
-    """Apply temperature scaling, top-p (nucleus) filtering, and sample.
+    """Apply repetition penalty, temperature, top-p, and sample a token.
 
     Used by both :meth:`SAESteering._generate_with_hooks` and
-    :meth:`SAESteering._generate_baseline` to avoid duplicating the
-    sampling logic.
+    :meth:`SAESteering._generate_baseline`.
 
     Args:
         logits: Raw logits of shape ``(1, vocab_size)``.
-        temperature: Sampling temperature.  Higher values produce
-            more random outputs.
-        top_p: Nucleus sampling threshold (0–1).  Only tokens
-            within the cumulative probability mass are considered.
+        temperature: Sampling temperature.
+        top_p: Nucleus sampling threshold (0–1).
+        repetition_penalty: CTRL-style penalty for already-generated
+            tokens. ``1.0`` disables it. Positive logits of seen tokens
+            are divided by the penalty, negative logits multiplied.
+        generated_tokens: All tokens generated so far (any shape); its
+            unique ids receive the penalty. ``None`` disables it.
+        generator: Optional ``torch.Generator`` for reproducible sampling.
 
     Returns:
         Sampled token tensor of shape ``(1, 1)``.
     """
+    if (
+        repetition_penalty != 1.0
+        and generated_tokens is not None
+        and generated_tokens.numel() > 0
+    ):
+        seen = generated_tokens.unique()
+        logits = logits.clone()
+        penalized = logits[:, seen]
+        penalized = torch.where(
+            penalized > 0,
+            penalized / repetition_penalty,
+            penalized * repetition_penalty,
+        )
+        logits[:, seen] = penalized
+
     logits = logits / temperature
 
     sorted_logits, sorted_indices = torch.sort(logits, descending=True)
@@ -129,7 +152,9 @@ def _sample_next_token(
     )
     logits[indices_to_remove] = float("-inf")
 
-    return torch.multinomial(F.softmax(logits, dim=-1), num_samples=1)
+    return torch.multinomial(
+        F.softmax(logits, dim=-1), num_samples=1, generator=generator
+    )
 
 
 @dataclass(frozen=True)
