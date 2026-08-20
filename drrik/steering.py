@@ -594,8 +594,15 @@ class SAESteering:
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": text},
             ]
-            input_ids = self.tokenizer.apply_chat_template(
+            encoded = self.tokenizer.apply_chat_template(
                 messages, return_tensors="pt", add_generation_prompt=True
+            )
+            # transformers>=5 returns a BatchEncoding (mapping); older
+            # versions return a tensor directly.
+            input_ids = (
+                encoded["input_ids"]
+                if not isinstance(encoded, torch.Tensor)
+                else encoded
             )
             return input_ids.to(self.model.device), None
         return self._tokenize(text)

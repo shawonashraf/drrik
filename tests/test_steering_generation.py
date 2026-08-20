@@ -166,7 +166,8 @@ class _StubTokenizer:
     ):
         assert messages[0]["role"] == "system"
         assert messages[1]["role"] == "user"
-        return torch.tensor([[9, 9, 9]])
+        # transformers>=5 returns a BatchEncoding (mapping), not a tensor
+        return {"input_ids": torch.tensor([[9, 9, 9]])}
 
 
 def test_build_prompt_ids_plain_and_chat():
