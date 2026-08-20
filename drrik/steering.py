@@ -45,6 +45,7 @@ Example:
 """
 
 import re
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
@@ -129,6 +130,154 @@ def _sample_next_token(
     logits[indices_to_remove] = float("-inf")
 
     return torch.multinomial(F.softmax(logits, dim=-1), num_samples=1)
+
+
+@dataclass(frozen=True)
+class SteeringComponent:
+    """One steering direction: a unit-norm vector, its layer, and magnitude.
+
+    Attributes:
+        layer: Transformer layer index where the vector is injected.
+        feature_idx: SAE feature index the vector was extracted from.
+        strength: Absolute magnitude added along the unit vector.
+        vector: Unit-norm direction of shape ``(activation_dim,)``.
+    """
+
+    layer: int
+    feature_idx: int
+    strength: float
+    vector: torch.Tensor
+
+
+class SteeringVectors:
+    """Container of steering components with a shared hook path.
+
+    Holds pre-extracted, unit-norm SAE decoder columns ready for injection
+    during generation.  The hook path records where the source SAE was
+    trained: ``"layer"`` (residual stream, e.g. Anthropic's
+    ``resid_post_layer_*`` SAEs) or ``"mlp"`` (MLP output, e.g. SAEs
+    trained by Drrik's own pipeline).
+
+    Example:
+        ```python
+        vectors = SteeringVectors.from_hf_dataset(
+            "shawon/llama-3.1-8b-instruct_eiffel_tower"
+        )
+        steering = SAESteering(source=vectors, model_name="meta-llama/Llama-3.1-8B-Instruct")
+        ```
+    """
+
+    def __init__(self, components: List[SteeringComponent], hook_path: str = "layer"):
+        """
+        Args:
+            components: Non-empty list of steering components.
+            hook_path: ``"layer"`` (hook ``model.layers[N]`` output) or
+                ``"mlp"`` (hook ``model.layers[N].mlp`` output).
+
+        Raises:
+            ValueError: If ``components`` is empty or ``hook_path`` is invalid.
+        """
+        if hook_path not in ("layer", "mlp"):
+            raise ValueError(f"hook_path must be 'layer' or 'mlp', got {hook_path!r}")
+        if not components:
+            raise ValueError("SteeringVectors requires at least one component")
+        self.components = list(components)
+        self.hook_path = hook_path
+
+    @property
+    def layers(self) -> List[int]:
+        """Sorted unique layer indices across all components."""
+        return sorted({c.layer for c in self.components})
+
+    @property
+    def activation_dim(self) -> int:
+        """Dimension of the steering vectors (all components share it)."""
+        return self.components[0].vector.shape[0]
+
+    @classmethod
+    def from_sae(
+        cls,
+        sae: SparseAutoencoder,
+        layer: int,
+        feature_indices: List[int],
+        strengths: Optional[List[float]] = None,
+    ) -> "SteeringVectors":
+        """Build components from a Drrik-trained SAE's decoder columns.
+
+        Args:
+            sae: A trained :class:`~drrik.autoencoder.SparseAutoencoder`.
+            layer: Layer index the SAE was trained on.
+            feature_indices: Feature indices to extract.
+            strengths: Magnitude per feature. Defaults to all ``1.0``.
+
+        Returns:
+            ``SteeringVectors`` with ``hook_path="mlp"``.
+
+        Raises:
+            ValueError: If lengths mismatch or an index is out of range.
+        """
+        if strengths is None:
+            strengths = [1.0] * len(feature_indices)
+        if len(feature_indices) != len(strengths):
+            raise ValueError("feature_indices and strengths must have the same length")
+
+        components = []
+        for fid, s in zip(feature_indices, strengths):
+            if fid < 0 or fid >= sae.hidden_dim:
+                raise ValueError(
+                    f"feature_idx {fid} out of range [0, {sae.hidden_dim})"
+                )
+            v = sae.decoder.weight[:, fid].detach().clone().float()
+            v = v / v.norm()
+            components.append(SteeringComponent(layer, int(fid), float(s), v))
+        return cls(components, hook_path="mlp")
+
+    def save(self, path: Union[str, Path]) -> None:
+        """Save components and hook path to a ``.pt`` file.
+
+        Args:
+            path: Destination path. Parent directories are created.
+        """
+        path = Path(path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        torch.save(
+            {
+                "hook_path": self.hook_path,
+                "components": [
+                    {
+                        "layer": c.layer,
+                        "feature_idx": c.feature_idx,
+                        "strength": c.strength,
+                        "vector": c.vector.cpu(),
+                    }
+                    for c in self.components
+                ],
+            },
+            path,
+        )
+        logger.info(f"Saved {len(self.components)} steering vectors to {path}")
+
+    @classmethod
+    def from_file(cls, path: Union[str, Path]) -> "SteeringVectors":
+        """Load components saved by :meth:`save` (hook path restored).
+
+        Args:
+            path: Path to a ``.pt`` file written by :meth:`save`.
+
+        Returns:
+            The reconstructed ``SteeringVectors``.
+        """
+        state = torch.load(Path(path), weights_only=False)
+        components = [
+            SteeringComponent(
+                layer=int(c["layer"]),
+                feature_idx=int(c["feature_idx"]),
+                strength=float(c["strength"]),
+                vector=c["vector"].float(),
+            )
+            for c in state["components"]
+        ]
+        return cls(components, hook_path=state["hook_path"])
 
 
 class SAESteering:

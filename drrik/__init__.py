@@ -68,7 +68,7 @@ __version__ = "0.1.0"
 from drrik.models import ActivationExtractor
 from drrik.autoencoder import SparseAutoencoder
 from drrik.visualization import FeatureVisualizer
-from drrik.steering import SAESteering
+from drrik.steering import SAESteering, SteeringVectors
 from drrik.config import Config
 from drrik.settings import EnvironmentSettings, WandbConfig, get_settings
 
@@ -77,6 +77,7 @@ __all__ = [
     "SparseAutoencoder",
     "FeatureVisualizer",
     "SAESteering",
+    "SteeringVectors",
     "Config",
     "EnvironmentSettings",
     "WandbConfig",
