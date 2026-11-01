@@ -584,9 +584,6 @@ pytest -m "not slow"
 - [nnsight Library](https://github.com/ndif-team/nnsight) - For activation extraction
 - [Toy Models of Superposition](https://transformer-circuits.pub/2022/toy_models/index.html) - Anthropic
 
-## License
-
-AGPL-3.0
 
 ## Contributing
 
